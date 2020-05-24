@@ -8,6 +8,7 @@ include( "SupportFunctions" );
 include( "LoyaltySupport" );
 include( "Civ6Common" );
 include( "Colors" );
+include( "LuaClass" );
 include( "CitySupport" );
 
 -- ===========================================================================
@@ -148,23 +149,22 @@ function CityBanner:new( playerID: number, cityID : number, districtID : number,
 		UI.DataError("Missing bannerStyle: "..tostring(playerID)..", "..tostring(cityID)..", "..tostring(districtID)..", "..tostring(bannerType) ); 
 	end
 
-	local oNewCityBanner:object = {};
-	setmetatable(oNewCityBanner, {__index = CityBanner });
-	oNewCityBanner:Initialize(playerID, cityID, districtID, bannerType, bannerStyle);
+	self = LuaClass.new(CityBanner);
+	self:Initialize(playerID, cityID, districtID, bannerType, bannerStyle);
 
 	if (bannerType == BANNERTYPE_CITY_CENTER) then
 		if (CityBannerInstances[playerID] == nil) then
 			CityBannerInstances[playerID] = {};
 		end
-		CityBannerInstances[playerID][cityID] = oNewCityBanner;
+		CityBannerInstances[playerID][cityID] = self;
 	else
 		if (MiniBannerInstances[playerID] == nil) then
 			MiniBannerInstances[playerID] = {};
 		end
-		MiniBannerInstances[playerID][districtID] = oNewCityBanner;
+		MiniBannerInstances[playerID][districtID] = self;
 	end
 
-	return oNewCityBanner;
+	return self;
 end
 
 -- ===========================================================================
@@ -2132,7 +2132,7 @@ function CityBanner:UpdateLoyalty()
 									instance.LineTitle:SetText(hasBeenMet and civName or Locale.Lookup("LOC_LOYALTY_PANEL_UNMET_CIV"));
 									instance.LineValue:SetText(lineVal);
 
-									local civIconManager :object = CivilizationIcon:AttachInstance(instance.CivilizationIcon);
+									local civIconManager = CivilizationIcon:AttachInstance(instance.CivilizationIcon);
 									civIconManager:UpdateIconFromPlayerID(playerPresence.Player);
 								end
 							end

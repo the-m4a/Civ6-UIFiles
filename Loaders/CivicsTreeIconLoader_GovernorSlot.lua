@@ -10,11 +10,6 @@ g_ExtraIconData["MODIFIER_PLAYER_ADJUST_GOVERNOR_POINTS"] = {
 		end,
 
 	Reset = function(self)
-		self.IM:ResetInstances();
-	end,
-
-	Destroy = function(self)
-		self.IM:DestroyInstances();
-	end
-
+			self.IM:ResetInstances();
+		end
 };
