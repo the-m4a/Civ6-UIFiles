@@ -1,44 +1,59 @@
--- ===========================================================================
---	Leader container list on top of the HUD
--- ===========================================================================
-include("DiplomacyRibbonSupport");
+-- Copyright 2017-2019, Firaxis Games.
+-- Leader container list on top of the HUD
+
 include("InstanceManager");
-include("TeamSupport");
 include("LeaderIcon");
+include("PlayerSupport");
+include("SupportFunctions");
+include("GameCapabilities");
+
 
 -- ===========================================================================
 --	CONSTANTS
 -- ===========================================================================
 local SCROLL_SPEED			:number = 3;
-local SIZE_LEADER			:number = 52;
-local PADDING_LEADER		:number = 3;
-local BG_PADDING_EDGE		:number = 20;
-local RIGHT_HOOKS_INITIAL	:number	= 163;
-local MIN_LEFT_HOOKS		:number	= 260;
-local MINIMUM_BG_SIZE		:number = 100;
-local WORLD_TRACKER_OFFSET	:number	= 40;
+local UPDATE_FRAMES			:number = 2;	-- HACK: Require 2 frames to update size change :(
+local LEADER_ART_OFFSET_X	:number = -4;
+local LEADER_ART_OFFSET_Y	:number = -9;
+
 
 -- ===========================================================================
---	VARIABLES
+--	GLOBALS
 -- ===========================================================================
-local m_leadersMet			:number = 0; -- Number of leaders in the ribbon
-local m_scrollIndex			:number = 0; -- Index of leader that is supposed to be on the far right
-local m_scrollPercent		:number = 0; -- Necessary for scroll lerp
-local m_maxNumLeaders		:number = 0; -- Number of leaders that can fit in the ribbon
-local m_isScrolling			:boolean = false;
-local m_uiLeadersByID		:table = {};
-local m_uiChatIconsVisible	:table = {};
+g_maxNumLeaders	= 0;		-- Number of leaders that can fit in the ribbon
+g_kRefreshRequesters = {}	-- Who requested a (refresh of stats)
+
+
+-- ===========================================================================
+--	MEMBERS
+-- ===========================================================================
 local m_kLeaderIM			:table = InstanceManager:new("LeaderInstance", "LeaderContainer", Controls.LeaderStack);
-local m_PartialScreenHookBar: table;	-- = ContextPtr:LookUpControl( "/InGame/PartialScreenHooks/LaunchBacking" );
-local m_LaunchBar			: table;	-- = ContextPtr:LookUpControl( "/InGame/LaunchBar/LaunchBacking" );
+local m_leadersMet			:number = 0;		-- Number of leaders in the ribbon
+local m_scrollIndex			:number = 0;		-- Index of leader that is supposed to be on the far right.  TODO: Remove this and instead scroll based on visible area.
+local m_scrollPercent		:number = 0;		-- Necessary for scroll lerp
+local m_isScrolling			:boolean = false;
+local m_uiLeadersByID		:table = {};		-- map of (entire) leader controls based on player id
+local m_uiLeadersByPortrait	:table = {};		-- map of leader portraits based on player id
+local m_uiChatIconsVisible	:table = {};
+local m_leaderInstanceHeight:number = 0;		-- How tall is an instantiated leader instance.
+local m_ribbonStats			:number = -1;		-- From Options menu, enum of how this should display.
+local m_isIniting			:boolean = true;	-- Tracking if initialization is occuring.
+local m_kActiveIds			:table = {};		-- Which player(s) are active.
+local m_isYieldsSubscribed	:boolean = false;	-- Are yield events subscribed to?
+
 
 -- ===========================================================================
 --	Cleanup leaders
 -- ===========================================================================
 function ResetLeaders()
-	m_leadersMet = 0;
-	m_uiLeadersByID = {};
 	m_kLeaderIM:ResetInstances();
+	m_leadersMet = 0;
+	m_uiLeadersByID = {};	
+	m_uiLeadersByPortrait = {};
+	m_scrollPercent = 0;
+	m_scrollIndex = 0;
+	m_leaderInstanceHeight = 0;
+	RealizeScroll();
 end
 
 -- ===========================================================================
@@ -52,130 +67,261 @@ function OnLeaderClicked(playerID : number )
 end
 
 -- ===========================================================================
---	Add a leader (from right to left)
+function ShowStats( uiLeader:table )
+	uiLeader.StatStack:SetHide(false);
+	uiLeader.StatStack:CalculateSize();
+	uiLeader.StatBacking:SetColorByName("HUDRIBBON_STATS_SHOW");
+	uiLeader.ActiveLeaderAndStats:SetHide(false);
+end
+
 -- ===========================================================================
-function AddLeader(iconName : string, playerID : number, isUniqueLeader: boolean)
+function HideStats( uiLeader:table )
+	uiLeader.StatStack:SetHide(true);			
+	uiLeader.StatBacking:SetColorByName("HUDRIBBON_STATS_HIDE");
+	uiLeader.ActiveLeaderAndStats:SetHide(true);
+end
+
+-- ===========================================================================
+--	UI Callback
+-- ===========================================================================
+function OnLeaderSizeChanged( uiLeader:table )	
+--	local pSize:table = uiLeader.LeaderContainer:GetSize();
+--	uiLeader.ActiveLeaderAndStats:SetSizeVal( pSize.x + LEADER_ART_OFFSET_X, pSize.y + LEADER_ART_OFFSET_Y );
+end
+
+-- ===========================================================================
+--	Add a leader (from right to left)
+--	iconName,	What icon to draw for the leader portrait
+--	playerID,	gamecore's player ID
+--	kProps,		(optional) properties about the leader
+--					isUnique, no other leaders are like this one
+--					isMasked, even if stats are show, hide their values.
+-- ===========================================================================
+function AddLeader(iconName : string, playerID : number, kProps: table)
+	
+	local isUnique:boolean = false;
+	if kProps == nil then kProps={}; end
+	if kProps.isUnqiue then	isUnqiue=kProps.isUnqiue; end
+
 	m_leadersMet = m_leadersMet + 1;
 
 	-- Create a new leader instance
-	local leaderIcon, instance = LeaderIcon:GetInstance(m_kLeaderIM);
-	m_uiLeadersByID[playerID] = instance;
-	leaderIcon:UpdateIcon(iconName, playerID, isUniqueLeader);
+	local leaderIcon, uiLeader = LeaderIcon:GetInstance(m_kLeaderIM);
+	local uiPortraitButton :table = leaderIcon.Controls.SelectButton;
+	m_uiLeadersByID[playerID] = uiLeader;
+	m_uiLeadersByPortrait[uiPortraitButton] = uiLeader;
+
+	leaderIcon:UpdateIcon(iconName, playerID, isUnqiue);
 	leaderIcon:RegisterCallback(Mouse.eLClick, function() OnLeaderClicked(playerID); end);
 
+	-- If using focus, setup mouse in/out callbacks... otherwise clear them.
+	if 	m_ribbonStats == RibbonHUDStats.FOCUS then
+		uiPortraitButton:RegisterMouseEnterCallback( 
+			function( uiControl:table )
+				ShowStats( uiLeader );
+			end
+		);
+		uiPortraitButton:RegisterMouseExitCallback( 
+			function( uiControl:table )
+				HideStats( uiLeader );
+			end	
+		);
+	else
+		uiPortraitButton:ClearMouseEnterCallback(); 
+		uiPortraitButton:ClearMouseExitCallback();
+	end
+
+	uiLeader.LeaderContainer:RegisterSizeChanged( 
+		function( uiControl ) 
+			OnLeaderSizeChanged( uiLeader );
+		end
+	);
+
+	FinishAddingLeader( playerID, uiLeader, kProps );
+
 	-- Returning these so mods can override them and modify the icons
-	return leaderIcon, instance;
+	return leaderIcon, uiLeader;
+end
+
+
+-- ===========================================================================
+--	Complete adding a leader.
+--	Two steps for allowing easier MOD overrides/explansion.
+-- ===========================================================================
+function FinishAddingLeader( playerID:number, uiLeader:table, kProps:table)
+
+	local isMasked:boolean = false;
+	if kProps.isMasked then	isMasked = kProps.isMasked; end
+
+	-- Show fields for enabled victory types.	
+	local isHideScore	:boolean = isMasked or (not (Game.IsVictoryEnabled("VICTORY_SCORE") or (not HasCapability("VICTORY_SCORE"))));
+	local isHideMilitary:boolean = isMasked or (not Game.IsVictoryEnabled("VICTORY_CONQUEST") or not GameCapabilities.HasCapability("CAPABILITY_DISPLAY_TOP_PANEL_YIELDS"));
+	local isHideScience	:boolean = isMasked or (not HasCapability("CAPABILITY_SCIENCE") or not GameCapabilities.HasCapability("CAPABILITY_DISPLAY_TOP_PANEL_YIELDS"));
+	local isHideCulture :boolean = isMasked or (not HasCapability("CAPABILITY_CULTURE") or not GameCapabilities.HasCapability("CAPABILITY_DISPLAY_TOP_PANEL_YIELDS"));
+	local isHideGold	:boolean = isMasked or (not HasCapability("CAPABILITY_GOLD") or not GameCapabilities.HasCapability("CAPABILITY_DISPLAY_TOP_PANEL_YIELDS"));
+	local isHideFaith	:boolean = isMasked or (not HasCapability("CAPABILITY_RELIGION") or not GameCapabilities.HasCapability("CAPABILITY_DISPLAY_TOP_PANEL_YIELDS"));
+
+	uiLeader.Score:SetHide( isHideScore );
+	uiLeader.Military:SetHide( isHideMilitary );
+	uiLeader.Science:SetHide( isHideScience );
+	uiLeader.Culture:SetHide( isHideCulture );
+	uiLeader.Gold:SetHide( isHideGold );
+	uiLeader.Faith:SetHide( isHideFaith );
+	
+	UpdateStatValues( playerID, uiLeader );
 end
 
 -- ===========================================================================
 --	Clears leaders and re-adds them to the stack
 -- ===========================================================================
 function UpdateLeaders()
-	-- Clear previous list items
-	ResetLeaders();
+
+	ResetLeaders();	
+
+	m_ribbonStats = Options.GetUserOption("Interface", "RibbonStats");
+
 
 	-- Add entries for everyone we know (Majors only)
-	local aPlayers:table = PlayerManager.GetAliveMajors();
+	local kPlayers		:table = PlayerManager.GetAliveMajors();
+	local kMetPlayers	:table = {};
+	local kUniqueLeaders:table = {};
+
 	local localPlayerID:number = Game.GetLocalPlayer();
-	if (localPlayerID ~= -1) then		-- It is possible to not have a local player!
-		local localPlayer:table = Players[localPlayerID];
+	if localPlayerID ~= -1 then
+		local localPlayer	:table = Players[localPlayerID];
 		local localDiplomacy:table = localPlayer:GetDiplomacy();
-
-		table.sort(aPlayers, function(a:table,b:table) return localDiplomacy:GetMetTurn(a:GetID()) < localDiplomacy:GetMetTurn(b:GetID()) end);
-
-		--First, add me!
-		AddLeader("ICON_"..PlayerConfigurations[localPlayerID]:GetLeaderTypeName(), localPlayerID);
-
-		--Then, let's do a check to see if any of these players are duplicate leaders and track it.
-		--		Must go through entire list to detect duplicates (would be lovely if we had an IsUnique from PlayerConfigurations)
-		local metPlayers:table = {};
-		local isUniqueLeader:table = {};
-		for _, pPlayer in ipairs(aPlayers) do
+		table.sort(kPlayers, function(a:table,b:table) return localDiplomacy:GetMetTurn(a:GetID()) < localDiplomacy:GetMetTurn(b:GetID()) end);
+				
+		AddLeader("ICON_"..PlayerConfigurations[localPlayerID]:GetLeaderTypeName(), localPlayerID, {});		--First, add local player.
+		kMetPlayers, kUniqueLeaders = GetMetPlayersAndUniqueLeaders();										--Fill table for other players.
+	else
+		-- No local player so assume it's auto-playing; show everyone.
+		for _, pPlayer in ipairs(kPlayers) do
 			local playerID:number = pPlayer:GetID();
-			if(playerID ~= localPlayerID) then
-				local playerMet:boolean = localDiplomacy:HasMet(playerID);
-				if (playerMet) then
-					local leaderName:string = PlayerConfigurations[playerID]:GetLeaderTypeName();
-					if (isUniqueLeader[leaderName] == nil) then
-						isUniqueLeader[leaderName] = true;
-					else
-						isUniqueLeader[leaderName] = false;
-					end	
-				end
-				metPlayers[playerID] = playerMet;
-			end
+			kMetPlayers[ playerID ] = true;
+			if (kUniqueLeaders[playerID] == nil) then
+				kUniqueLeaders[playerID] = true;
+			else
+				kUniqueLeaders[playerID] = false;
+			end	
 		end
+	end
 
-		--Then, add the leader icons.
-		for _, pPlayer in ipairs(aPlayers) do
-			local playerID:number = pPlayer:GetID();
-			if(playerID ~= localPlayerID) then
-				local playerMet:boolean = metPlayers[playerID];
-				local pPlayerConfig:table = PlayerConfigurations[playerID];
-				if (playerMet or (GameConfiguration.IsAnyMultiplayer() and pPlayerConfig:IsHuman())) then
-					if playerMet then
-						local leaderName:string = pPlayerConfig:GetLeaderTypeName();
-						AddLeader("ICON_"..leaderName, playerID, isUniqueLeader[leaderName]);
-					else
-						AddLeader("ICON_LEADER_DEFAULT", playerID);
-					end
+	--Then, add the leader icons.
+	for _, pPlayer in ipairs(kPlayers) do
+		local playerID:number = pPlayer:GetID();
+		if(playerID ~= localPlayerID) then
+			local isMet			:boolean = kMetPlayers[playerID];
+			local pPlayerConfig	:table = PlayerConfigurations[playerID];
+			local isHumanMP		:boolean = (GameConfiguration.IsAnyMultiplayer() and pPlayerConfig:IsHuman());
+			if (isMet or isHumanMP) then
+				local leaderName:string = pPlayerConfig:GetLeaderTypeName();
+				local isMasked	:boolean = (isMet==false) and isHumanMP;	-- Multiplayer human but haven't met
+				local isUnique	:boolean = kUniqueLeaders[leaderName];
+				local iconName	:string = "ICON_LEADER_DEFAULT";
+				
+				-- If in an MP game and a player leaves the name returned will be NIL.				
+				if isMet and (leaderName ~= nil) then
+					iconName = "ICON_"..leaderName;
 				end
+				
+				AddLeader(iconName, playerID, { 
+					isMasked=isMasked,
+					isUnique=isUnique
+					}
+				);
 			end
 		end
 	end
 
-	Controls.LeaderStack:CalculateSize();
 	RealizeSize();
 end
 
 -- ===========================================================================
 --	Updates size and location of BG and Scroll controls
+--	additionalElementsWidth, from MODS that add additional content.
 -- ===========================================================================
--- Optional size argument being passed in through an event.
-local BG_TILE_PADDING: number	= 0;
-function RealizeSize( barWidth:number )
-	local launchBarWidth = MIN_LEFT_HOOKS;
-	local partialScreenBarWidth = RIGHT_HOOKS_INITIAL;
-	-- TODO this should somehow be done relative to the other controls
-	m_PartialScreenHookBar	= ContextPtr:LookUpControl( "/InGame/PartialScreenHooks/ButtonStack" );
-	m_LaunchBar				= ContextPtr:LookUpControl( "/InGame/LaunchBar/ButtonStack" );
+function RealizeSize( additionalElementsWidth:number )
 	
-	if (m_LaunchBar ~= nil) then
-		launchBarWidth = math.max(m_LaunchBar:GetSizeX() + WORLD_TRACKER_OFFSET + BG_TILE_PADDING, MIN_LEFT_HOOKS);
+	if additionalElementsWidth == nil then
+		additionalElementsWidth = 0;
 	end
 
-	if (m_PartialScreenHookBar~=nil) then
-		partialScreenBarWidth = m_PartialScreenHookBar:GetSizeX() + BG_TILE_PADDING;
+	local MIN_LEFT_HOOKS		:number	= 260;
+	local RIGHT_HOOKS_INITIAL	:number	= 163;
+	local WORLD_TRACKER_OFFSET	:number	= 80;					-- Amount of additional space the World Tracker check-box takes up.
+	local launchBarWidth		:number = MIN_LEFT_HOOKS;
+	local partialScreenBarWidth :number = RIGHT_HOOKS_INITIAL;	--Width of the upper right-hand of screen.
+
+	-- Loop through leaders in determining size.
+	m_leaderInstanceHeight = 0;
+	for _,uiLeader in ipairs(m_uiLeadersByID) do
+		-- If all are shown  then use max size.
+		if m_ribbonStats == RibbonHUDStats.SHOW then
+			m_leaderInstanceHeight = math.max( uiLeader.LeaderContainer:GetSizeY(), m_leaderInstanceHeight );
+		else
+			-- just the leader portrait.
+			m_leaderInstanceHeight = uiLeader.SelectButton:GetSizeY();
+		end
+	end
+
+
+	-- When not showing stats, leaders can be pushed closer together.
+	if m_ribbonStats == RibbonHUDStats.SHOW then
+		Controls.LeaderStack:SetStackPadding( 0 );		
+	else
+		Controls.LeaderStack:SetStackPadding( -8 );
+	end
+	Controls.LeaderStack:CalculateSize();
+
+	-- Obtain controls
+	local uiPartialScreenHookRoot:table	= ContextPtr:LookUpControl( "/InGame/PartialScreenHooks/RootContainer" );
+	local uiPartialScreenHookBar :table	= ContextPtr:LookUpControl( "/InGame/PartialScreenHooks/ButtonStack" );
+	local uiLaunchBar			 :table	= ContextPtr:LookUpControl( "/InGame/LaunchBar/ButtonStack" );
+	
+	if (uiLaunchBar ~= nil) then
+			launchBarWidth = math.max(uiLaunchBar:GetSizeX() + WORLD_TRACKER_OFFSET, MIN_LEFT_HOOKS);
+	end
+	if (uiPartialScreenHookBar~=nil) then
+		if uiPartialScreenHookRoot and uiPartialScreenHookRoot:IsVisible() then
+			partialScreenBarWidth = uiPartialScreenHookBar:GetSizeX();
+		else
+			partialScreenBarWidth = 0;  -- There are no partial screen hooks at all; backing is invisible.
+		end
+
 	end
 
 	local screenWidth:number, screenHeight:number = UIManager:GetScreenSizeVal(); -- Cache screen dimensions
 	
-	local maxSize:number = screenWidth - launchBarWidth - partialScreenBarWidth;
-	m_maxNumLeaders = math.floor(maxSize / (SIZE_LEADER + PADDING_LEADER));
-	
-	local size:number = maxSize;
-	if(m_leadersMet == 0) then
-		Controls.LeaderBG:SetHide(true);
-	else
-		Controls.LeaderBG:SetHide(false);
-		size = m_maxNumLeaders * (SIZE_LEADER + PADDING_LEADER) - 8;
-		local bgSize;
-		if (m_leadersMet > m_maxNumLeaders) then
-			bgSize = m_maxNumLeaders * (SIZE_LEADER + PADDING_LEADER)+ BG_PADDING_EDGE;
+	local SIZE_LEADER	:number = 63;	-- Size of leader icon and border.
+	local paddingLeader	:number = Controls.LeaderStack:GetStackPadding();
+	local maxSize		:number = screenWidth - launchBarWidth - partialScreenBarWidth;	
+	local size			:number = maxSize;
+
+	g_maxNumLeaders = math.floor(maxSize / (SIZE_LEADER + paddingLeader));
+
+	if m_leadersMet > 0 then
+		-- Compute size of the background shadow
+		local BG_PADDING_EDGE	:number = 50;		-- Account for the (tons of) alpha on edges of shadow graphic.
+		local MINIMUM_BG_SIZE	:number = 100;
+		local bgSize			:number = 0;
+		if (m_leadersMet > g_maxNumLeaders) then
+			bgSize = g_maxNumLeaders * (SIZE_LEADER + paddingLeader) + additionalElementsWidth + BG_PADDING_EDGE;
 		else
-			bgSize = m_leadersMet * (SIZE_LEADER + PADDING_LEADER)+ BG_PADDING_EDGE;
-		end
-		Controls.LeaderBG:SetSizeX(math.max(bgSize, MINIMUM_BG_SIZE));
-		Controls.LeaderBGClip:SetSizeX(math.max(bgSize, MINIMUM_BG_SIZE));
-		Controls.RibbonContainer:SetSizeX(math.max(bgSize, MINIMUM_BG_SIZE));
+			bgSize = m_leadersMet * (SIZE_LEADER + paddingLeader) + additionalElementsWidth + BG_PADDING_EDGE;
+		end		
+		bgSize = math.max(bgSize, MINIMUM_BG_SIZE);
+		Controls.RibbonContainer:SetSizeX( bgSize );
+
+		-- Compute actual size of the container
+		local PADDING_EDGE		:number = 8;
+		size = g_maxNumLeaders * (SIZE_LEADER + paddingLeader) + PADDING_EDGE + additionalElementsWidth;
 	end
+	Controls.ScrollContainer:SetSizeX(size);
+	Controls.ScrollContainer:SetSizeY( m_leaderInstanceHeight );
 	Controls.LeaderScroll:SetSizeX(size);
-	Controls.RibbonContainer:ReprocessAnchoring();
-	Controls.RibbonContainer:SetOffsetX(partialScreenBarWidth);
-	Controls.LeaderBGClip:CalculateSize();
-	Controls.LeaderBGClip:ReprocessAnchoring();
+	Controls.RibbonContainer:SetOffsetX(partialScreenBarWidth);	
 	Controls.LeaderScroll:CalculateSize();
-	Controls.LeaderScroll:ReprocessAnchoring();
 	RealizeScroll();
 end
 
@@ -183,19 +329,17 @@ end
 --	Updates visibility of previous and next buttons
 -- ===========================================================================
 function RealizeScroll()
-	Controls.NextButtonContainer:SetHide(not CanScroll(-1));
-	Controls.PreviousButtonContainer:SetHide(not CanScroll(1));
+	Controls.NextButtonContainer:SetHide( not CanScrollLeft() );
+	Controls.PreviousButtonContainer:SetHide( not CanScrollRight() );	
 end
 
 -- ===========================================================================
---	Determines visibility of previous and next buttons
+function CanScrollLeft()
+	return m_scrollIndex > 0;
+end
 -- ===========================================================================
-function CanScroll(direction : number)
-	if(direction < 0) then
-		return m_scrollIndex > 0;
-	else
-		return m_leadersMet - m_scrollIndex > m_maxNumLeaders;
-	end
+function CanScrollRight()
+	return m_leadersMet - m_scrollIndex > g_maxNumLeaders;
 end
 
 -- ===========================================================================
@@ -206,7 +350,9 @@ function Scroll(direction : number)
 	m_scrollPercent = 0;
 	m_scrollIndex = m_scrollIndex + direction;
 
-	if(m_scrollIndex < 0) then m_scrollIndex = 0; end
+	if(m_scrollIndex < 0) then 
+		m_scrollIndex = 0; 
+	end
 
 	if(not m_isScrolling) then
 		ContextPtr:SetUpdate( UpdateScroll );
@@ -221,8 +367,8 @@ end
 -- ===========================================================================
 function UpdateScroll(deltaTime : number)
 	
-	local start:number = Controls.LeaderScroll:GetScrollValue();
-	local destination:number = 1.0 - (m_scrollIndex / (m_leadersMet - m_maxNumLeaders));
+	local start			:number = Controls.LeaderScroll:GetScrollValue();
+	local destination	:number = 1.0 - (m_scrollIndex / (m_leadersMet - g_maxNumLeaders));
 
 	m_scrollPercent = m_scrollPercent + (SCROLL_SPEED * deltaTime);
 	if(m_scrollPercent >= 1) then
@@ -252,6 +398,30 @@ function OnUpdateUI(type:number, tag:string, iData1:number, iData2:number, strDa
 end
 
 -- ===========================================================================
+--	EVENT
+--	Options menu changed
+-- ===========================================================================
+function OnUserOptionChanged( eOptionSet:number, hOptionKey:number, newOptionValue )
+	local ribbonStatsHash :number = DB.MakeHash("RibbonStats");
+	if hOptionKey == ribbonStatsHash then
+	
+		RealizeYieldEvents();			-- Change subscription to events (if necessary)	
+		m_kLeaderIM:DestroyInstances();	-- Look is changing, start with new instances.
+		m_scrollIndex = 0;				-- Reset scroll position to start.
+		UpdateLeaders();				-- Now update all the leaders.
+		RealizeScroll();
+
+		-- Play appropriate animations
+		for id,_ in pairs(m_kActiveIds) do
+			if Players[id] and Players[id]:IsTurnActive() then
+				OnTurnBegin( id );
+			end
+		end
+	end	
+end
+
+-- ===========================================================================
+--	EVENT
 --	Diplomacy Callback
 -- ===========================================================================
 function OnDiplomacyMeet(player1ID:number, player2ID:number)
@@ -267,6 +437,7 @@ function OnDiplomacyMeet(player1ID:number, player2ID:number)
 end
 
 -- ===========================================================================
+--	EVENT
 --	Diplomacy Callback
 -- ===========================================================================
 function OnDiplomacyWarStateChange(player1ID:number, player2ID:number)
@@ -282,6 +453,7 @@ function OnDiplomacyWarStateChange(player1ID:number, player2ID:number)
 end
 
 -- ===========================================================================
+--	EVENT
 --	Diplomacy Callback
 -- ===========================================================================
 function OnDiplomacySessionClosed(sessionID:number)
@@ -295,11 +467,10 @@ function OnDiplomacySessionClosed(sessionID:number)
 			UpdateLeaders();
 		end
 	end
-
 end
 
 -- ===========================================================================
---	Game Engine Event
+--	EVENT
 -- ===========================================================================
 function OnInterfaceModeChanged(eOldMode:number, eNewMode:number)
 	if eNewMode == InterfaceModeTypes.VIEW_MODAL_LENS then
@@ -311,54 +482,161 @@ function OnInterfaceModeChanged(eOldMode:number, eNewMode:number)
 end
 
 -- ===========================================================================
---	LocalPlayerTurnBegin / RemotePlayerTurnBegin Callback
+function UpdateStatValues( playerID:number, uiLeader:table )	
+
+	local pPlayer:table = Players[playerID];
+
+	if uiLeader.Score:IsVisible() then 
+		local score	:number = Round( pPlayer:GetScore() );
+		uiLeader.Score:SetText("[ICON_Capital]"..tostring(score));
+	end
+
+	if uiLeader.Military:IsVisible() then	
+		local military :number = Round( Players[playerID]:GetStats():GetMilitaryStrengthWithoutTreasury() );
+		uiLeader.Military:SetText( "[ICON_Strength]"..tostring(military));
+	end
+
+	if uiLeader.Science:IsVisible() then 
+		local science :number = Round(pPlayer:GetTechs():GetScienceYield() );
+		uiLeader.Science:SetText( "[ICON_Science]"..tostring(science));
+	end
+
+	if uiLeader.Culture:IsVisible() then 
+		local culture :number = Round(pPlayer:GetCulture():GetCultureYield() );
+		uiLeader.Culture:SetText( "[ICON_Culture]"..tostring(culture));
+	end
+
+	if uiLeader.Gold:IsVisible() then 		
+		local pTreasury	:table	= pPlayer:GetTreasury();
+		local gold		:number = math.floor( pTreasury:GetGoldBalance() );
+		uiLeader.Gold:SetText( "[ICON_Gold]"..tostring(gold));
+	end
+	
+	if uiLeader.Faith:IsVisible() then
+		local faith :number = Round( Players[playerID]:GetReligion():GetFaithBalance() );
+		uiLeader.Faith:SetText( "[ICON_Faith]"..tostring(faith));
+	end
+
+	-- Show or hide all stats based on options.
+	if m_ribbonStats == RibbonHUDStats.SHOW then
+		if uiLeader.StatStack:IsHidden() or m_isIniting then
+			ShowStats( uiLeader );
+		end
+	elseif m_ribbonStats == RibbonHUDStats.FOCUS or m_ribbonStats == RibbonHUDStats.HIDE then
+		if uiLeader.StatStack:IsVisible() or m_isIniting then			
+			HideStats( uiLeader );
+		end
+	end
+
+end
+
 -- ===========================================================================
-function OnTurnBegin(playerID:number)
-	local leader:table = m_uiLeadersByID[playerID];
-	if(leader ~= nil) then
-		leader.LeaderContainer:SetToBeginning();
-		leader.LeaderContainer:Play();
+--	EVENT
+-- ===========================================================================
+function OnTurnBegin( playerID:number )
+	local uiLeader		:table = m_uiLeadersByID[playerID];
+	if(uiLeader ~= nil) then
+		UpdateStatValues( playerID, uiLeader );
+
+		local localPlayerID:number = Game.GetLocalPlayer();
+		if(localPlayerID == PlayerTypes.NONE or localPlayerID == PlayerTypes.OBSERVER)then
+			return;
+		end
+
+		-- Update the approripate animation (alpha vs slide) based on what mode is being used.
+		if 	m_ribbonStats == RibbonHUDStats.SHOW then
+			if(not(playerID == localPlayerID or Players[localPlayerID]:GetDiplomacy():HasMet(playerID))) then
+				uiLeader.LeaderContainer:SetSizeVal(63,63);
+			end
+			local pSize:table = uiLeader.LeaderContainer:GetSize();
+			uiLeader.ActiveLeaderAndStats:SetSizeVal( pSize.x + LEADER_ART_OFFSET_X, pSize.y + LEADER_ART_OFFSET_Y );
+			uiLeader.ActiveLeaderAndStats:SetToBeginning();
+			uiLeader.ActiveLeaderAndStats:Play();
+		else
+			uiLeader.ActiveSlide:SetToBeginning();
+			uiLeader.ActiveSlide:Play();
+		end
+	end
+
+	-- Kluge: autoplay layout will frequently size ribbon before other panels and place it behind them in t he HUD.
+	local isAutoPlay:boolean = (Game.GetLocalPlayer() == -1);
+	if isAutoPlay then
+		RealizeSize();
+	end
+
+	m_kActiveIds[playerID] = true;
+
+	UpdateLeaders();
+end
+
+-- ===========================================================================
+function ResetActiveAnim( playerID:number )
+	local uiLeader :table = m_uiLeadersByID[playerID];
+	if(uiLeader ~= nil) then
+		uiLeader.ActiveLeaderAndStats:SetToBeginning();
+		uiLeader.ActiveSlide:SetToBeginning();
 	end
 end
 
-function OnTurnEnd(playerID:number)
-	if(playerID ~= -1) then
-		local leader = m_uiLeadersByID[playerID];
-		if(leader ~= nil) then
-			leader.LeaderContainer:Reverse();
+-- ===========================================================================
+--	EVENT
+-- ===========================================================================
+function OnTurnEnd( playerID:number )
+	local uiLeader :table = m_uiLeadersByID[playerID];
+	if(uiLeader ~= nil) then
+		if m_ribbonStats == RibbonHUDStats.SHOW then
+			uiLeader.ActiveLeaderAndStats:Reverse();
+		else
+			uiLeader.ActiveSlide:Reverse();
 		end
 	end
+	m_kActiveIds[playerID] = nil;
+end
+
+-- ===========================================================================
+--	EVENT
+-- ===========================================================================
+function OnLocalTurnBegin()
+	local playerID	:number = Game.GetLocalPlayer();
+	if playerID == -1 then return; end;
+	OnTurnBegin( playerID );
+end
+
+-- ===========================================================================
+--	EVENT
+-- ===========================================================================
+function OnLocalTurnEnd()
+	local playerID	:number = Game.GetLocalPlayer();
+	if playerID == -1 then return; end;
+	OnTurnEnd( playerID );
+end
+
+-- ===========================================================================
+--	LUAEvent
+-- ===========================================================================
+function OnLaunchBarResized( width:number )
+	RealizeSize();
 end
 
 -- ===========================================================================
 --	UI Callback
 -- ===========================================================================
 function OnScrollLeft()
-	if CanScroll(-1) then Scroll(-1); end
+	if CanScrollLeft() then 
+		Scroll(-1); 
+	end
 end
 
 -- ===========================================================================
 --	UI Callback
 -- ===========================================================================
 function OnScrollRight()
-	if CanScroll(1) then Scroll(1); end
-end
-
--- ===========================================================================
---	Debug Helper
--- ===========================================================================
-function DebugWorstCase()
-	-- Clear previous list items
-	ResetLeaders();
-
-	for i=1, 50 do
-		AddLeader("ICON_LEADER_DEFAULT", i);
+	if CanScrollRight() then 
+		Scroll(1); 
 	end
-
-	Controls.LeaderStack:CalculateSize();
-	RealizeSize();
 end
 
+-- ===========================================================================
 function OnChatReceived(fromPlayer:number, stayOnScreen:boolean)
 	local instance:table= m_uiLeadersByID[fromPlayer];
 	if instance == nil then return; end
@@ -381,6 +659,7 @@ function OnChatReceived(fromPlayer:number, stayOnScreen:boolean)
 	instance.ChatIndicatorFade:Play();
 end
 
+-- ===========================================================================
 function OnChatPanelShown(fromPlayer:number, stayOnScreen:boolean)
 	for _, chatIndicatorFade in ipairs(m_uiChatIconsVisible) do
 		chatIndicatorFade:RegisterEndCallback(function() chatIndicatorFade:SetToBeginning(); end);
@@ -390,37 +669,250 @@ function OnChatPanelShown(fromPlayer:number, stayOnScreen:boolean)
 end
 
 -- ===========================================================================
---	INIT
+function OnLoadGameViewStateDone()
+	if(GameConfiguration.IsAnyMultiplayer()) then
+		for leaderID, uiLeader in pairs(m_uiLeadersByID) do
+			if Players[leaderID]:IsTurnActive() then
+				uiLeader.ActiveLeaderAndStats:SetToBeginning();
+				uiLeader.ActiveLeaderAndStats:Play();
+			end
+		end
+	end
+end
+
 -- ===========================================================================
-function Initialize()
-	--DebugWorstCase();
-	UpdateLeaders();
-	Controls.LeaderScroll:SetScrollValue(1);
+--	UI Callback
+--	Refresh the stats.
+-- ===========================================================================
+function OnRefresh()
+	ContextPtr:ClearRequestRefresh();
 
-	Events.SystemUpdateUI.Add( OnUpdateUI );
-	Events.DiplomacyMeet.Add( OnDiplomacyMeet );
-	Events.DiplomacySessionClosed.Add( OnDiplomacySessionClosed );
-	Events.DiplomacyDeclareWar.Add( OnDiplomacyWarStateChange ); 
-	Events.DiplomacyMakePeace.Add( OnDiplomacyWarStateChange ); 
-	Events.DiplomacyRelationshipChanged.Add( UpdateLeaders ); 
-	Events.InterfaceModeChanged.Add( OnInterfaceModeChanged );
-	Events.RemotePlayerTurnBegin.Add( OnTurnBegin );
-	Events.RemotePlayerTurnEnd.Add( OnTurnEnd );
-	Events.LocalPlayerTurnBegin.Add( function() OnTurnBegin(Game.GetLocalPlayer()); end );
-	Events.LocalPlayerTurnEnd.Add( function() OnTurnEnd(Game.GetLocalPlayer()); end );
-	Events.MultiplayerPlayerConnected.Add(UpdateLeaders);
-	Events.MultiplayerPostPlayerDisconnected.Add(UpdateLeaders);
-	Events.LocalPlayerChanged.Add(UpdateLeaders);
-	Events.PlayerInfoChanged.Add(UpdateLeaders);
-	Events.PlayerDefeat.Add(UpdateLeaders);
-	Events.PlayerRestored.Add(UpdateLeaders);
+	if table.count(g_kRefreshRequesters) > 0 then
+		local localPlayerID:number = Game.GetLocalPlayer();
+		if localPlayerID ~= -1 and Players[localPlayerID]:IsTurnActive() then 
+			local uiLeader :table = m_uiLeadersByID[localPlayerID];
+			if uiLeader ~= nil then
+				UpdateStatValues( localPlayerID, uiLeader );
+			end	
+		end
+	else
+		UI.DataError("Attempt to refresh diplomacy ribbon stats but no event triggered the refresh!");
+	end
+	g_kRefreshRequesters = {};	-- Clear out for next refresh
+end
 
-	LuaEvents.ChatPanel_OnChatReceived.Add(OnChatReceived);
-	LuaEvents.WorldTracker_OnChatShown.Add(OnChatPanelShown);
-	LuaEvents.LaunchBar_Resize.Add(RealizeSize);
-	LuaEvents.PartialScreenHooks_Resize.Add(RealizeSize);
+-- ===========================================================================
+--	Event
+--	Special from most other yield events as this may trigger on players other
+--	than the local player for actions such as making a deal.
+-- ===========================================================================
+function OnTreasuryChanged( playerID:number, yield:number , balance:number)	
+	local uiLeader :table = m_uiLeadersByID[playerID];
+	if uiLeader ~= nil then
+		UpdateStatValues( playerID, uiLeader );
+	end	
+
+	-- If refresh is pending for local player, it can be cleared.
+	if playerID == Game.GetLocalPlayer() and table.count(g_kRefreshRequesters) > 0 then
+		ContextPtr:ClearRequestRefresh();
+	end
+end
+
+-- ===========================================================================
+--	Only the local player's yields should be update by event to prevent
+--	multiplay changes that telgraph to others what is occuring.
+-- ===========================================================================
+function OnLocalStatUpdateRequest( eventName:string )
+	table.insert( g_kRefreshRequesters, eventName );
+	ContextPtr:RequestRefresh();
+end
+
+-- ===========================================================================
+--	Define EVENT callback functions so they can be added/removed based on
+--	whether or not yield stats are being shown.
+-- ===========================================================================
+OnAnarchyBegins				= function() OnLocalStatUpdateRequest( "OnAnarchyBegins" ); end
+OnAnarchyEnds				= function() OnLocalStatUpdateRequest( "OnAnarchyEnds" ); end
+OnCityFocusChanged			= function() OnLocalStatUpdateRequest( "OnCityFocusChanged" ); end
+OnCityInitialized			= function() OnLocalStatUpdateRequest( "OnCityInitialized" ); end
+OnCityProductionChanged		= function() OnLocalStatUpdateRequest( "OnCityProductionChanged" ); end
+OnCityWorkerChanged			= function() OnLocalStatUpdateRequest( "OnCityWorkerChanged" ); end
+OnDiplomacySessionClosed	= function() OnLocalStatUpdateRequest( "OnDiplomacySessionClosed" ); end
+OnFaithChanged				= function() OnLocalStatUpdateRequest( "OnFaithChanged" ); end
+OnGovernmentChanged			= function() OnLocalStatUpdateRequest( "OnGovernmentChanged" ); end
+OnGovernmentPolicyChanged	= function() OnLocalStatUpdateRequest( "OnGovernmentPolicyChanged" ); end
+OnGovernmentPolicyObsoleted	= function() OnLocalStatUpdateRequest( "OnGovernmentPolicyObsoleted" ); end
+OnGreatWorkCreated			= function() OnLocalStatUpdateRequest( "OnGreatWorkCreated" ); end
+OnImprovementAddedToMap		= function() OnLocalStatUpdateRequest( "OnImprovementAddedToMap" ); end
+OnImprovementRemovedFromMap	= function() OnLocalStatUpdateRequest( "OnImprovementRemovedFromMap" ); end
+OnPantheonFounded			= function() OnLocalStatUpdateRequest( "OnPantheonFounded" ); end
+OnPlayerAgeChanged			= function() OnLocalStatUpdateRequest( "OnPlayerAgeChanged" ); end
+OnResearchCompleted			= function() OnLocalStatUpdateRequest( "OnResearchCompleted" ); end
+OnUnitAddedToMap			= function() OnLocalStatUpdateRequest( "OnUnitAddedToMap" ); end
+OnUnitGreatPersonActivated	= function() OnLocalStatUpdateRequest( "OnUnitGreatPersonActivated" ); end
+OnUnitKilledInCombat		= function() OnLocalStatUpdateRequest( "OnUnitKilledInCombat" ); end
+OnUnitRemovedFromMap		= function() OnLocalStatUpdateRequest( "OnUnitRemovedFromMap" ); end
+
+-- ===========================================================================
+function SubscribeYieldEvents()
+	m_isYieldsSubscribed = true;
+	
+	Events.AnarchyBegins.Add( OnAnarchyBegins );
+	Events.AnarchyEnds.Add( OnAnarchyEnds );
+	Events.CityFocusChanged.Add( OnCityFocusChanged );
+	Events.CityInitialized.Add( OnCityInitialized );			
+	Events.CityProductionChanged.Add( OnCityProductionChanged );
+	Events.CityWorkerChanged.Add( OnCityWorkerChanged );	
+	Events.FaithChanged.Add( OnFaithChanged );
+	Events.GovernmentChanged.Add( OnGovernmentChanged );
+	Events.GovernmentPolicyChanged.Add( OnGovernmentPolicyChanged );
+	Events.GovernmentPolicyObsoleted.Add( OnGovernmentPolicyObsoleted );
+	Events.GreatWorkCreated.Add( OnGreatWorkCreated );
+	Events.ImprovementAddedToMap.Add( OnImprovementAddedToMap );
+	Events.ImprovementRemovedFromMap.Add( OnImprovementRemovedFromMap );
+	Events.PantheonFounded.Add( OnPantheonFounded );
+	Events.PlayerAgeChanged.Add( OnPlayerAgeChanged );
+	Events.ResearchCompleted.Add( OnResearchCompleted );
+	Events.TreasuryChanged.Add( OnTreasuryChanged );	
+	Events.UnitAddedToMap.Add( OnUnitAddedToMap );
+	Events.UnitGreatPersonActivated.Add( OnUnitGreatPersonActivated );
+	Events.UnitKilledInCombat.Add( OnUnitKilledInCombat );
+	Events.UnitRemovedFromMap.Add( OnUnitRemovedFromMap );
+end
+
+-- ===========================================================================
+function UnsubscribeYieldEvents()
+	m_isYieldsSubscribed = false;
+
+	Events.AnarchyBegins.Remove( OnAnarchyBegins );
+	Events.AnarchyEnds.Remove( OnAnarchyEnds );
+	Events.CityFocusChanged.Remove( OnCityFocusChanged );
+	Events.CityInitialized.Remove( OnCityInitialized );			
+	Events.CityProductionChanged.Remove( OnCityProductionChanged );
+	Events.CityWorkerChanged.Remove( OnCityWorkerChanged );	
+	Events.FaithChanged.Remove( OnFaithChanged );
+	Events.GovernmentChanged.Remove( OnGovernmentChanged );
+	Events.GovernmentPolicyChanged.Remove( OnGovernmentPolicyChanged );
+	Events.GovernmentPolicyObsoleted.Remove( OnGovernmentPolicyObsoleted );
+	Events.GreatWorkCreated.Remove( OnGreatWorkCreated );
+	Events.ImprovementAddedToMap.Remove( OnImprovementAddedToMap );
+	Events.ImprovementRemovedFromMap.Remove( OnImprovementRemovedFromMap );
+	Events.PantheonFounded.Remove( OnPantheonFounded );
+	Events.PlayerAgeChanged.Remove( OnPlayerAgeChanged );
+	Events.ResearchCompleted.Remove( OnResearchCompleted );
+	Events.TreasuryChanged.Remove( OnTreasuryChanged );	
+	Events.UnitAddedToMap.Remove( OnUnitAddedToMap );
+	Events.UnitGreatPersonActivated.Remove( OnUnitGreatPersonActivated );
+	Events.UnitKilledInCombat.Remove( OnUnitKilledInCombat );
+	Events.UnitRemovedFromMap.Remove( OnUnitRemovedFromMap );
+end
+
+-- ===========================================================================
+--	Only listen for events related to yield updates if they are showing.
+-- ===========================================================================
+function RealizeYieldEvents()
+	if m_ribbonStats == RibbonHUDStats.HIDE then
+		if m_isYieldsSubscribed==false then 
+			return;									-- Already un-subscribed.
+		end
+		UnsubscribeYieldEvents();
+	else
+		if m_isYieldsSubscribed then return; end;	-- Already subscribed.
+		SubscribeYieldEvents();
+	end
+end
+
+
+-- ===========================================================================
+--	CALLBACK
+-- ===========================================================================
+function OnShutdown()
+	if m_isYieldsSubscribed then
+		UnsubscribeYieldEvents();
+	end
+
+	Events.DiplomacyDeclareWar.Remove( OnDiplomacyWarStateChange ); 
+	Events.DiplomacyMakePeace.Remove( OnDiplomacyWarStateChange ); 
+	Events.DiplomacyMeet.Remove( OnDiplomacyMeet );
+	Events.DiplomacyRelationshipChanged.Remove( UpdateLeaders ); 
+	Events.DiplomacySessionClosed.Remove( OnDiplomacySessionClosed );
+	Events.InterfaceModeChanged.Remove( OnInterfaceModeChanged );
+	Events.LoadGameViewStateDone.Remove( OnLoadGameViewStateDone );
+	Events.LocalPlayerChanged.Remove(UpdateLeaders);
+	Events.LocalPlayerTurnBegin.Remove( OnLocalTurnBegin );
+	Events.LocalPlayerTurnEnd.Remove( OnLocalTurnEnd );
+	Events.MultiplayerPlayerConnected.Remove(UpdateLeaders);
+	Events.MultiplayerPostPlayerDisconnected.Remove(UpdateLeaders);
+	Events.PlayerInfoChanged.Remove(UpdateLeaders);
+	Events.PlayerDefeat.Remove(UpdateLeaders);
+	Events.PlayerRestored.Remove(UpdateLeaders);
+	Events.RemotePlayerTurnBegin.Remove( OnTurnBegin );
+	Events.RemotePlayerTurnEnd.Remove( OnTurnEnd );
+	Events.SystemUpdateUI.Remove( OnUpdateUI );
+	Events.UserOptionChanged.Remove( OnUserOptionChanged );	
+
+	LuaEvents.ChatPanel_OnChatReceived.Remove(OnChatReceived);
+	LuaEvents.LaunchBar_Resize.Remove( OnLaunchBarResized );
+	LuaEvents.PartialScreenHooks_Realize.Remove(RealizeSize);
+	LuaEvents.WorldTracker_OnChatShown.Remove(OnChatPanelShown);
+end
+
+-- ===========================================================================
+function LateInitialize()
+	RealizeYieldEvents();
+
+	ContextPtr:SetRefreshHandler( OnRefresh );
 
 	Controls.NextButton:RegisterCallback( Mouse.eLClick, OnScrollLeft );
 	Controls.PreviousButton:RegisterCallback( Mouse.eLClick, OnScrollRight );
+	Controls.LeaderScroll:SetScrollValue(1);
+
+	Events.DiplomacyDeclareWar.Add( OnDiplomacyWarStateChange ); 
+	Events.DiplomacyMakePeace.Add( OnDiplomacyWarStateChange ); 
+	Events.DiplomacyMeet.Add( OnDiplomacyMeet );
+	Events.DiplomacyRelationshipChanged.Add( UpdateLeaders ); 
+	Events.DiplomacySessionClosed.Add( OnDiplomacySessionClosed );
+	Events.InterfaceModeChanged.Add( OnInterfaceModeChanged );
+	Events.LoadGameViewStateDone.Add( OnLoadGameViewStateDone );
+	Events.LocalPlayerChanged.Add(UpdateLeaders);
+	Events.LocalPlayerTurnBegin.Add( OnLocalTurnBegin );
+	Events.LocalPlayerTurnEnd.Add( OnLocalTurnEnd );
+	Events.MultiplayerPlayerConnected.Add(UpdateLeaders);
+	Events.MultiplayerPostPlayerDisconnected.Add(UpdateLeaders);
+	Events.PlayerInfoChanged.Add(UpdateLeaders);
+	Events.PlayerDefeat.Add(UpdateLeaders);
+	Events.PlayerRestored.Add(UpdateLeaders);
+	Events.RemotePlayerTurnBegin.Add( OnTurnBegin );
+	Events.RemotePlayerTurnEnd.Add( OnTurnEnd );	
+	Events.SystemUpdateUI.Add( OnUpdateUI );
+	Events.UserOptionChanged.Add( OnUserOptionChanged );	
+
+	LuaEvents.ChatPanel_OnChatReceived.Add(OnChatReceived);
+	LuaEvents.LaunchBar_Resize.Add( OnLaunchBarResized );
+	LuaEvents.PartialScreenHooks_Realize.Add(RealizeSize);
+	LuaEvents.WorldTracker_OnChatShown.Add(OnChatPanelShown);
+		
+	if not BASE_LateInitialize then	-- Only update leaders if this is the last in the call chain.
+		UpdateLeaders();
+	end
+end
+
+-- ===========================================================================
+function OnInit( isReload:boolean )
+	LateInitialize();
+	m_isIniting = false;
+
+	local localPlayerID:number = Game.GetLocalPlayer();
+	if localPlayerID ~= -1 and Players[localPlayerID]:IsTurnActive() then 
+		OnLocalTurnBegin();
+	end
+end
+
+-- ===========================================================================
+--	Main Initialize
+-- ===========================================================================
+function Initialize()	
+	ContextPtr:SetInitHandler( OnInit );
+	ContextPtr:SetShutdown( OnShutdown );
 end
 Initialize();

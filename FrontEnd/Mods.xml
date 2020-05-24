@@ -2,7 +2,7 @@
 <Context xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="..\..\..\..\..\CivTech\Libs\ForgeUI\ForgeUI_Assets\Controls.xsd"
 		ColorSet="BodyTextCool" Style="FontNormal22" FontEffect="Stroke">
 
-
+	<Include File="PopupDialog" />
 	<Box ID="MainGrid" Size="1024,parent" Anchor="C,T" Color="9,44,72,200" TutorialActive="1">
 		<Image Texture="Controls_GradientSmall" Size="22,parent" AnchorSide="O,I" Anchor="R,T" Color="0,0,0,200" Rotate="270" Offset="0,0"/>
 		<Image Texture="Controls_GradientSmall" Size="22,parent" AnchorSide="O,I" Anchor="L,T" Color="0,0,0,200" Rotate="90" Offset="0,0"/>
@@ -29,8 +29,6 @@
 				<GridButton ID="InstalledTab" Style="ShellTab" Size="300,41"  String="LOC_MODS_INSTALLED"/>
 				<GridButton ID="SubscriptionsTab" Style="ShellTab" Size="300,41"  String="LOC_MODS_SUBSCRIPTIONS"/>
 			</Stack>
-
-			<GridButton ID="WorldBuilder"  Anchor="R,T" Offset="30,65" Style="MainButton" Size="300,41" FontStyle="Stroke" ColorSet="ButtonCS" String="LOC_MODS_WORLD_BUILDER" />
 
 			<Container ID="InstalledTabPanel" Size="parent-30,parent-115"  Anchor="L,T" Offset="15,115">
 				<Stack Padding="5">
@@ -83,6 +81,7 @@
 								<Image Texture="AdditionalContent_IconBacking50" Size="70,70" Anchor="L,C" Offset="6,0">
 									<Image ID="OfficialIcon" Anchor="C,C"	Size="50,50" Offset="4,0" Texture="OfficialContent_50"/>
 									<Image ID="CommunityIcon" Anchor="C,C"	Size="50,50" Offset="4,0" Texture="CommunityContent_50"/>
+									<Image ID="MapIcon" Anchor="C,C"	Size="50,50" Offset="4,0" Texture="WorldBuilderMap_50"/>
 								</Image>
 
 								<Stack Anchor="C,T" Offset="30,8" StackPadding="7">
@@ -93,11 +92,14 @@
 							</Grid>
 
 							<!-- Additional details scroll panel -->
-							<ScrollPanel ID="ModDetailsScrollPanel" Anchor="L,T" Vertical="1" Offset="0,100" Size="parent,parent-130" AutoScrollBar="1">
+							<ScrollPanel ID="ModDetailsScrollPanel" Anchor="L,T" Vertical="1" Offset="0,100" Size="parent,parent-160" AutoScrollBar="1">
 								<Stack Anchor="L,T" ID="ModDetailsStack" StackGrowth="Bottom" Padding="5" Size="parent,10">
 
+									
 									<Container Size="parent,8"/>
-									<Label ID="ModIdVersion" Style="FontNormal16" Anchor="C,T" Offset="0,5"/>
+									<Label ID="ModCompatibilityWarning" Style="FontNormal14" String="LOC_MODS_DETAILS_NOT_COMPATIBLE_WARNING" Anchor="C,T" Offset="0,5"/>
+									<Label ID="ModIdVersion" Style="FontNormal14" Anchor="C,T" Offset="0,5"/>
+									<Label ID="ModFileName" Style="FontNormal14" Anchor="C,T" Offset="0,5"/>
 									<Container Size="parent,6"/>
 
 									<Stack ID="ModPropertiesStack" StackGrowth="Right" Anchor="C,T" Padding="5">
@@ -108,6 +110,7 @@
 											<Container ID="ModSpecialThanksCaption" Anchor="R,T" Offset="0,5" Size="auto,22">
 												<Label Style="FontNormal16" String="LOC_MODS_DETAILS_SPECIAL_THANKS" />
 											</Container>
+											<Label ID="ModCreatedCaption" Style="FontNormal16" Anchor="R,T" Offset="0,5" String="LOC_MODS_DETAILS_CREATED" />
 											<Label ID="ModOwnershipCaption" Style="FontNormal16" Anchor="R,T" Offset="0,5" String="LOC_MODS_DETAILS_OWNERSHIP" />
 											<Label ID="ModAffectsSavedGamesCaption" Style="FontNormal16" Anchor="R,T" Offset="0,5" String="LOC_MODS_DETAILS_AFFECTS_SAVED_GAMES" />
 											<Label ID="ModSupportsSinglePlayerCaption" Style="FontNormal16" Anchor="R,T" Offset="0,5" String="LOC_MODS_DETAILS_SINGLEPLAYER" />
@@ -116,6 +119,7 @@
 										<Stack ID="ModPropertiesValuesStack">
 											<Label ID="ModAuthorsValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" String="Joe Bob" WrapWidth="300" />
 											<Label ID="ModSpecialThanksValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" WrapWidth="300"/>
+											<Label ID="ModCreatedValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" WrapWidth="300"/>
 											<Label ID="ModOwnershipValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" String="LOC_MODS_DETAILS_OWNERSHIP_NO" />
 											<Label ID="ModAffectsSavedGamesValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" String="LOC_MODS_NO" />
 											<Label ID="ModSupportsSinglePlayerValue" Style="FontNormal16" Anchor="L,T" Offset="0,5" String="LOC_MODS_YES" />
@@ -139,9 +143,10 @@
 							</ScrollPanel>
 
 							<!-- Enable/Disable Buttons -->
+							<CheckBox ID="WhitelistMod" Style="CheckBoxModsControl" String="LOC_MODS_DETAILS_COMPATIBILITY_WHITELIST_PROMPT"   Anchor="C,B"  Size="150,24" Offset="0,30" />
 							<Box Color="10,60,78,255" Anchor="C,B" Size="Parent,3" Offset="0,26" />
-							<GridButton ID="EnableButton" Style="MainButtonSmall" Anchor="C,B" Size="250,24" String="LOC_MODS_ENABLE"/>
-							<GridButton ID="DisableButton" Style="MainButtonSmall" Anchor="C,B" Size="250,24" String="LOC_MODS_DISABLE"/>
+							<GridButton ID="EnableButton" Style="MainButtonSmall" Anchor="C,B" Offset="0,-5" Size="250,30" String="LOC_MODS_ENABLE"/>
+							<GridButton ID="DisableButton" Style="MainButtonSmall" Anchor="C,B" Offset="0,-5" Size="250,30" String="LOC_MODS_DISABLE"/>
 						</Container>
 					</Grid>
 				</Grid>
@@ -195,6 +200,7 @@
 				<Image Texture="AdditionalContent_IconBacking36" Size="53,49" Anchor="L,C" Offset="6,0">
 					<Image ID="OfficialIcon" Anchor="C,C"	Size="36,36" Offset="2,0" Texture="OfficialContent_36"/>
 					<Image ID="CommunityIcon" Anchor="C,C"	Size="36,36" Offset="2,0" Texture="CommunityContent_36"/>
+					<Image ID="MapIcon" Anchor="C,C" Size="36,36" Offset="2,0" Texture="WorldBuilderMap_36" />
 				</Image>			
 
 				<Label ID="ModTitle" Style="FontNormal16" Anchor="L,C" Offset="64,0" WrapWidth="265" />
@@ -213,6 +219,7 @@
 			<Stack Anchor="R,B" StackGrowth="Left">
 				<GridButton ID="SubscriptionViewButton" Style="TabButton" Anchor="R,B" Offset="0,5" Size="150,36" String="LOC_MODS_VIEW" />
 				<GridButton ID="SubscriptionUpdateButton" Style="TabButton" Anchor="R,B" Offset="0,5" Size="150,36" String="LOC_MODS_UPDATE" />
+				<GridButton ID="UnsubscribeButton" Style="TabButton" Anchor="R,B" Offset="0,5" Size="150,36" String="LOC_MODS_UNSUBSCRIBE" />
 			</Stack>
 		</Grid>
 	</Instance>
@@ -220,5 +227,8 @@
 	<Instance Name="ReferenceItemInstance">
 		<Label ID="Item" Style="FontNormal14" Anchor="L,T" WrapWidth="parent-10" String="[ICON_DOT] Some Awesome Mod." />
 	</Instance>
+
+	<!-- Dialog Support -->
+	<MakeInstance Name="PopupDialog" />
 
 </Context>

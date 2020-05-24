@@ -1,6 +1,5 @@
--- ===========================================================================
+--	Copyright 2016-2019, Firaxis Games
 --
---	PlotToolTip
 --	Show information about the plot currently being hovered by the mouse,
 --	or the last plot to be touched.
 --
@@ -8,8 +7,6 @@
 --		m_isForceOff	- Completely turns off the system (don't even initialize!)
 --		m_isActive		- Temporary turn on/off the system (e.g., wonder reveals)
 --		m_isOff			- Off for a moment; such as another tooltip is up
---
--- ===========================================================================
 
 
 -- ===========================================================================
@@ -37,6 +34,7 @@ local TIME_DEFAULT_PAUSE	:number = 1.1;
 -- ===========================================================================
 local m_isActive		:boolean	= false;	-- Is this active
 local m_isShowDebug		:boolean	= false;	-- Read from CONFIG, show debug information in the tooltip?
+m_isWorldBuilder  					= false;	-- Is this World Builder mode?
 local m_isOff			:boolean	= false;	-- If the plot tooltip is turned off by a game action/
 local m_isShiftDown		:boolean	= false;	-- Is the shift key currently down?
 local m_isUsingMouse	:boolean	= true;		-- Both mouse & touch valid at once, but what is the player using?
@@ -190,13 +188,11 @@ function TooltipOff()
 end
 
 -- ===========================================================================
--- View(data)
--- Update the layout based on the view model
+-- GetDetails(data)
+-- Construct details table used to populate plot tooltip
 -- ===========================================================================
-function View(data:table, bIsUpdate:boolean)
-	-- Build a string that contains all plot details.
+function GetDetails(data)
 	local details = {};
-	local debugInfo = {};
 
 	if(data.Owner ~= nil) then
 
@@ -245,6 +241,7 @@ function View(data:table, bIsUpdate:boolean)
 		--if it's a resource that requires a tech to improve, let the player know that in the tooltip
 		local resourceType = data.ResourceType;
 		local resource = GameInfo.Resources[resourceType];
+		local resourceHash = GameInfo.Resources[resourceType].Hash;
 
 		local resourceString = Locale.Lookup(resource.Name);
 		local resourceTechType;
@@ -282,7 +279,7 @@ function View(data:table, bIsUpdate:boolean)
 				end
 				valid_terrain = not has_terrain or valid_terrain;
 				
-				if( GameInfo.Terrains[terrainType].TerrainType  == "TERRAIN_COAST") then
+				if( terrainType ~= nil and GameInfo.Terrains[terrainType].TerrainType  == "TERRAIN_COAST") then
 					if ("DOMAIN_SEA" == GameInfo.Improvements[improvementType].Domain) then
 						valid_terrain = true;
 					elseif ("DOMAIN_LAND" == GameInfo.Improvements[improvementType].Domain) then
@@ -302,17 +299,29 @@ function View(data:table, bIsUpdate:boolean)
 				end
 			end
 		end
-		if (resourceTechType ~= nil and valid_feature == true and valid_terrain == true) then
-			local localPlayer	= Players[Game.GetLocalPlayer()];
-			if (localPlayer ~= nil) then
-				local playerTechs	= localPlayer:GetTechs();
+		local localPlayer = Players[Game.GetLocalPlayer()];
+		if (localPlayer ~= nil) then
+			local playerResources = localPlayer:GetResources();
+			if(playerResources:IsResourceVisible(resourceHash)) then
+				if (resourceTechType ~= nil and valid_feature == true and valid_terrain == true) then
+					local playerTechs	= localPlayer:GetTechs();
+					local techType = GameInfo.Technologies[resourceTechType];
+					if (techType ~= nil and not playerTechs:HasTech(techType.Index)) then
+						resourceString = resourceString .. "[COLOR:Civ6Red]  ( " .. Locale.Lookup("LOC_TOOLTIP_REQUIRES") .. " " .. Locale.Lookup(techType.Name) .. ")[ENDCOLOR]";
+					end
+				end
+
+				table.insert(details, resourceString);
+			end
+		elseif m_isWorldBuilder then
+			if (resourceTechType ~= nil and valid_feature == true and valid_terrain == true) then
 				local techType = GameInfo.Technologies[resourceTechType];
-				if (techType ~= nil and not playerTechs:HasTech(techType.Index)) then
-					resourceString = resourceString .. "[COLOR:Civ6Red]  ( " .. Locale.Lookup("LOC_TOOLTIP_REQUIRES") .. " " .. Locale.Lookup(techType.Name) .. ")[ENDCOLOR]";
+				if (techType ~= nil) then
+					resourceString = resourceString .. "( " .. Locale.Lookup("LOC_TOOLTIP_REQUIRES") .. " " .. Locale.Lookup(techType.Name) .. ")[ENDCOLOR]";
 				end
 			end
+			table.insert(details, resourceString);
 		end
-		table.insert(details, resourceString)
 	end
 	
 	if (data.IsRiver == true) then
@@ -350,25 +359,26 @@ function View(data:table, bIsUpdate:boolean)
 	if (data.FeatureType ~= nil) then
 	    feature = GameInfo.Features[data.FeatureType];
 	end
-	
-	if ((data.FeatureType ~= nil and feature.NaturalWonder) or not data.IsWater) then
-		local strAppealDescriptor;
-		for row in GameInfo.AppealHousingChanges() do
-			local iMinimumValue = row.MinimumValue;
-			local szDescription = row.Description;
-			if (data.Appeal >= iMinimumValue) then
-				strAppealDescriptor = Locale.Lookup(szDescription);
-				break;
+		
+	if GameCapabilities.HasCapability("CAPABILITY_LENS_APPEAL") then
+		if ((data.FeatureType ~= nil and feature.NaturalWonder) or not data.IsWater) then
+			local strAppealDescriptor;
+			for row in GameInfo.AppealHousingChanges() do
+				local iMinimumValue = row.MinimumValue;
+				local szDescription = row.Description;
+				if (data.Appeal >= iMinimumValue) then
+					strAppealDescriptor = Locale.Lookup(szDescription);
+					break;
+				end
 			end
-		end
-		if(strAppealDescriptor) then
-			table.insert(details, Locale.Lookup("LOC_TOOLTIP_APPEAL", strAppealDescriptor, data.Appeal));
+			if(strAppealDescriptor) then
+				table.insert(details, Locale.Lookup("LOC_TOOLTIP_APPEAL", strAppealDescriptor, data.Appeal));
+			end
 		end
 	end
 
-	if (data.Continent == nil) then
-		table.insert(details, Locale.Lookup("LOC_TOOLTIP_CONTINENT_NONE"));
-	else
+	-- Do not include ('none') continent line unless continent plot. #35955
+	if (data.Continent ~= nil) then
 		table.insert(details, Locale.Lookup("LOC_TOOLTIP_CONTINENT", GameInfo.Continents[data.Continent].Description));
 	end
 
@@ -389,7 +399,7 @@ function View(data:table, bIsUpdate:boolean)
 	end
 
 	-- CITY TILE
-	if(data.IsCity == true) then
+	if(data.IsCity == true and data.DistrictType ~= nil) then
 		
 		table.insert(details, "------------------");
 		
@@ -401,25 +411,9 @@ function View(data:table, bIsUpdate:boolean)
 			local str = tostring(v) .. Locale.Lookup(yieldicon) .. Locale.Lookup(yield);
 			table.insert(details, str);
 		end
-		
-		--if(data.Buildings ~= nil and table.count(data.Buildings) > 0) then
-		--	table.insert(details, "Buildings: ");
-			
-		--	for i, v in ipairs(data.Buildings) do 
-		--		table.insert(details, "  " .. Locale.Lookup(v));
-		--	end
-		--end
-
-		--if(data.Constructions ~= nil and table.count(data.Constructions) > 0) then
-		--	table.insert(details, "UnderConstruction: ");
-		--	
-		--	for i, v in ipairs(data.Constructions) do 
-		--		table.insert(details, "  " .. Locale.Lookup(v));
-		--	end
-		--end
 
 	-- DISTRICT TILE
-	elseif(data.DistrictID ~= -1) then
+	elseif(data.DistrictID ~= -1 and data.DistrictType ~= nil) then
 		if (not GameInfo.Districts[data.DistrictType].InternalOnly) then	--Ignore 'Wonder' districts
 			-- Plot yields (ie. from Specialists)
 			if (data.Yields ~= nil) then
@@ -439,6 +433,8 @@ function View(data:table, bIsUpdate:boolean)
 			local sDistrictName :string = Locale.Lookup(Locale.Lookup(GameInfo.Districts[data.DistrictType].Name));
 			if (data.DistrictPillaged) then
 				sDistrictName = sDistrictName .. " " .. Locale.Lookup("LOC_TOOLTIP_PLOT_PILLAGED_TEXT");
+			elseif (not data.DistrictComplete) then
+				sDistrictName = sDistrictName .. " " .. Locale.Lookup("LOC_TOOLTIP_PLOT_CONSTRUCTION_TEXT");
 			end
 			table.insert(details, "------------------");
 			table.insert(details, sDistrictName);
@@ -527,8 +523,19 @@ function View(data:table, bIsUpdate:boolean)
 		table.insert(details, Locale.Lookup("LOC_TOOLTIP_PLOT_CONTAMINATED_TEXT", data.Fallout));
 	end
 
+	return details;
+end
+
+-- ===========================================================================
+--	Update the layout based on the view model
+-- ===========================================================================
+function View( data:table )
+	-- Build a string that contains all plot details.
+	local details = GetDetails(data);
+
 	-- Add debug information in here:
-	if m_isShowDebug then
+	local debugInfo = {};
+	if m_isShowDebug or m_isWorldBuilder then
 		-- Show plot x,y, id and vis count
 		local iVisCount = 0;
 		if (Game.GetLocalPlayer() ~= -1) then
@@ -537,10 +544,12 @@ function View(data:table, bIsUpdate:boolean)
 				iVisCount = pLocalPlayerVis:GetLayerValue(VisibilityLayerTypes.TERRAIN, data.X, data.Y);
 			end
 		end
-		table.insert(debugInfo, "Plot #:" .. tostring(data.Index) .. " @("..tostring(data.X) .. ", " .. tostring(data.Y) .. "), vis:" .. tostring(iVisCount));
-			
+		if m_isWorldBuilder then
+			table.insert(debugInfo, "("..tostring(data.X) .. "," .. tostring(data.Y) .. ")");
+		else
+			table.insert(debugInfo, "Debug #" .. tostring(data.Index) .. " ("..tostring(data.X) .. "," .. tostring(data.Y) .. "), vis:" .. tostring(iVisCount));
+		end
 	end
-
 	
 	-- Set the control values
 	if (data.IsLake) then
@@ -551,10 +560,6 @@ function View(data:table, bIsUpdate:boolean)
 		Controls.PlotName:LocalizeAndSetText(data.TerrainTypeName);
 	end
 	Controls.PlotDetails:SetText(table.concat(details, "[NEWLINE]"));
-
-	if m_isShowDebug then
-		Controls.DebugTxt:SetText(table.concat(debugInfo, "[NEWLINE]"));
-	end
 			
 	-- Some conditions, jump past "pause" and show immediately
 	if m_isShiftDown or UserConfiguration.GetValue("PlotToolTipFollowsMouse") == 0 then
@@ -565,35 +570,90 @@ function View(data:table, bIsUpdate:boolean)
 		Controls.TooltipMain:SetPauseTime( m_isUsingMouse and pauseTime or (pauseTime/2) );
 	end
 
-	if not bIsUpdate then
-		Controls.TooltipMain:SetToBeginning();
-		Controls.TooltipMain:Play();
-	end
+	Controls.TooltipMain:SetToBeginning();
+	Controls.TooltipMain:Play();	
 
 	-- Resize the background to wrap the content 
 	local plotName_width :number, plotName_height :number		= Controls.PlotName:GetSizeVal();
 	local nameHeight :number									= Controls.PlotName:GetSizeY();
 	local plotDetails_width :number, plotDetails_height :number = Controls.PlotDetails:GetSizeVal();
-	local debugInfoHeight :number								= Controls.DebugTxt:GetSizeY();
-	
 	local max_width :number = math.max(plotName_width, plotDetails_width);
+
+	if m_isShowDebug or m_isWorldBuilder then
+		Controls.DebugTxt:SetText(table.concat(debugInfo, "[NEWLINE]"));
+		local debugInfoWidth, debugInfoHeight :number			= Controls.DebugTxt:GetSizeVal();		
+		max_width = math.max(max_width, debugInfoWidth);
+	end
 	
 	Controls.InfoStack:CalculateSize();
 	local stackHeight = Controls.InfoStack:GetSizeY();
-
 	Controls.PlotInfo:SetSizeVal(max_width + SIZE_WIDTH_MARGIN, stackHeight + SIZE_HEIGHT_PADDING);	
 	
 	m_ttWidth, m_ttHeight = Controls.InfoStack:GetSizeVal();
 	Controls.TooltipMain:SetSizeVal(m_ttWidth, m_ttHeight);
 	Controls.TooltipMain:SetHide(false);
-
 end
 
+-- ===========================================================================
+-- Collect plot data and return it as a table
+-- ===========================================================================
+function FetchData( plot:table )
+
+	local kFalloutManager = Game.GetFalloutManager();
+	return {
+		X		= plot:GetX(),
+		Y		= plot:GetY(),
+		Index	= plot:GetIndex(),
+		Appeal				= plot:GetAppeal(),
+		Continent			= ContinentTypeMap[plot:GetContinentType()] or nil,
+		DefenseModifier		= plot:GetDefenseModifier(),
+		DistrictID			= plot:GetDistrictID(),
+		DistrictComplete	= false,
+		DistrictPillaged	= false,
+		DistrictType		= DistrictTypeMap[plot:GetDistrictType()],
+		Fallout				= kFalloutManager:GetFalloutTurnsRemaining(plot:GetIndex());
+		FeatureType			= FeatureTypeMap[plot:GetFeatureType()],
+		FeatureAdded		= plot:HasFeatureBeenAdded();
+		Impassable			= plot:IsImpassable();
+		ImprovementType		= ImprovementTypeMap[plot:GetImprovementType()],
+		ImprovementPillaged = plot:IsImprovementPillaged(),
+		IsCity				= plot:IsCity(),
+		IsLake				= plot:IsLake(),
+		IsRiver				= plot:IsRiver(),				
+		IsRoute				= plot:IsRoute(),
+		IsWater				= plot:IsWater(),
+		MovementCost		= plot:GetMovementCost(),
+		Owner				= (plot:GetOwner() ~= -1) and plot:GetOwner() or nil,
+		OwnerCity			= Cities.GetPlotPurchaseCity(plot);
+		ResourceCount		= plot:GetResourceCount(),
+		ResourceType		= ResourceTypeMap[plot:GetResourceType()],
+		RoutePillaged		= plot:IsRoutePillaged(),
+		RouteType			= plot:GetRouteType(),
+		TerrainType			= TerrainTypeMap[plot:GetTerrainType()],
+		TerrainTypeName		= (TerrainTypeMap[plot:GetTerrainType()] ~= nil) and GameInfo.Terrains[TerrainTypeMap[plot:GetTerrainType()]].Name or " ",
+		WonderComplete		= false,
+		WonderType			= BuildingTypeMap[plot:GetWonderType()],
+		Workers				= plot:GetWorkerCount();
+	
+		-- Remove these once we have a visualization of cliffs
+		IsNWOfCliff			= plot:IsNWOfCliff(),  
+		IsWOfCliff			= plot:IsWOfCliff(),
+		IsNEOfCliff			= plot:IsNEOfCliff(),
+		---- END REMOVE
+	
+		BuildingNames		= {},
+		BuildingsPillaged	= {},
+		BuildingTypes		= {},
+		Constructions		= {},
+		Yields				= {},
+		DistrictYields		= {},
+	};
+end
 
 -- ===========================================================================
 --	Show the information for a given plot
 -- ===========================================================================
-function ShowPlotInfo( plotId:number, bIsUpdate:boolean )
+function ShowPlotInfo( plotId:number )
 
 	-- Ignore request to show plot if system is not on or active.
 	if (not m_isActive or not UIManager:GetMouseOverWorld()) or m_isOff then
@@ -601,173 +661,150 @@ function ShowPlotInfo( plotId:number, bIsUpdate:boolean )
 		return;
 	end
 
-	-- Check cached plot ID, only update contents if a different plot is shown
-	if plotId ~= m_plotId or bIsUpdate then
-		m_plotId = plotId;
-		local plot = Map.GetPlotByIndex(plotId);
-		if (plot == nil) then
+	-- Only update contents if a different plot is shown
+	if plotId == m_plotId then
+		return;
+	end
+
+	-- Check cached plot ID, 
+	m_plotId = plotId;
+	local pPlot :object = Map.GetPlotByIndex(plotId);
+	if (pPlot == nil) then
+		m_isValidPlot = false;
+		ClearView();
+		return;
+	end
+
+	local eObserverPlayerID :number = Game.GetLocalObserver();
+
+	if (eObserverPlayerID == PlayerTypes.OBSERVER) then
+		m_isValidPlot = true;
+	else
+		local pPlayerVis = PlayersVisibility[eObserverPlayerID];
+		if (pPlayerVis == nil) then
 			m_isValidPlot = false;
-			ClearView();
-			return;
-		end
-
-		local eObserverPlayerID = Game.GetLocalObserver();
-
-		local eResourceType;
-
-		if (eObserverPlayerID == PlayerTypes.OBSERVER) then
-			m_isValidPlot = true;
-			eResourceType = plot:GetResourceType();
 		else
-			local pPlayerVis = PlayersVisibility[eObserverPlayerID];
-			if (pPlayerVis == nil) then
-				m_isValidPlot = false;
-				ClearView();
-				return;
-			end
-
-			eResourceType = pPlayerVis:GetLayerValue(VisibilityLayerTypes.RESOURCES, plot);
 			m_isValidPlot = pPlayerVis:IsRevealed(plotId);
 		end
-
-		local kFalloutManager = Game:GetFalloutManager();
+	end
 					
-		if (not m_isValidPlot) then
-			ClearView();
-		else
-			local new_data = {
-				X		= plot:GetX(),
-				Y		= plot:GetY(),
-				Index	= plot:GetIndex(),
-				Appeal				= plot:GetAppeal(),
-				Continent			= ContinentTypeMap[plot:GetContinentType()] or nil,
-				DefenseModifier		= plot:GetDefenseModifier(),
-				DistrictID			= plot:GetDistrictID();
-				DistrictPillaged	= false;
-				DistrictType		= DistrictTypeMap[plot:GetDistrictType()],
-				Fallout				= kFalloutManager:GetFalloutTurnsRemaining(plot:GetIndex());
-				FeatureType			= FeatureTypeMap[plot:GetFeatureType()],
-				FeatureAdded		= plot:HasFeatureBeenAdded();
-				Impassable			= plot:IsImpassable();
-				ImprovementType		= ImprovementTypeMap[plot:GetImprovementType()],
-				ImprovementPillaged = plot:IsImprovementPillaged(),
-				IsCity				= plot:IsCity(),
-				IsLake				= plot:IsLake(),
-				IsRiver				= plot:IsRiver(),				
-				IsRoute				= plot:IsRoute(),
-				IsWater				= plot:IsWater(),
-				MovementCost		= plot:GetMovementCost(),
-				Owner				= (plot:GetOwner() ~= -1) and plot:GetOwner() or nil,
-				OwnerCity			= Cities.GetPlotPurchaseCity(plot);
-				ResourceCount		= plot:GetResourceCount(),
-				ResourceType		= ResourceTypeMap[eResourceType],
-				RoutePillaged		= plot:IsRoutePillaged(),
-				RouteType			= plot:GetRouteType(),
-				TerrainType			= TerrainTypeMap[plot:GetTerrainType()],
-				TerrainTypeName		= GameInfo.Terrains[TerrainTypeMap[plot:GetTerrainType()]].Name,
-				WonderComplete		= false,
-				WonderType			= BuildingTypeMap[plot:GetWonderType()],
-				Workers				= plot:GetWorkerCount();
-
-				-- Remove these once we have a visualization of cliffs
-				IsNWOfCliff			= plot:IsNWOfCliff(),  
-				IsWOfCliff			= plot:IsWOfCliff(),
-				IsNEOfCliff			= plot:IsNEOfCliff(),
-				---- END REMOVE
-
-				BuildingNames		= {},
-				BuildingsPillaged	= {},
-				BuildingTypes		= {},
-				Constructions		= {},
-				Yields				= {},
-				DistrictYields		= {},
-			};
-
-			if (plot:IsNationalPark()) then
-				new_data.NationalPark = plot:GetNationalParkName();
-			else
-				new_data.NationalPark = "";
-			end
-				
-			if (new_data.OwnerCity) then
-				new_data.OwningCityName = new_data.OwnerCity:GetName();
-
-				local eDistrictType = plot:GetDistrictType();
-				if (eDistrictType) then
-					local cityDistricts = new_data.OwnerCity:GetDistricts();
-					if (cityDistricts) then
-						if (cityDistricts:IsPillaged(eDistrictType)) then
-							new_data.DistrictPillaged = true;
-						end
-					end
-				end
-
-				local cityBuildings = new_data.OwnerCity:GetBuildings();
-				if (cityBuildings) then
-					local buildingTypes = cityBuildings:GetBuildingsAtLocation(plotId);
-					for _, type in ipairs(buildingTypes) do
-						local building = GameInfo.Buildings[type];
-						table.insert(new_data.BuildingTypes, type);
-						local name = GameInfo.Buildings[building.BuildingType].Name;
-						table.insert(new_data.BuildingNames, name);
-						local bPillaged = cityBuildings:IsPillaged(type);
-						table.insert(new_data.BuildingsPillaged, bPillaged);
-					end
-					if (cityBuildings:HasBuilding(plot:GetWonderType())) then
-						new_data.WonderComplete = true;
-					end
-				end
-
-				local cityBuildQueue = new_data.OwnerCity:GetBuildQueue();
-				if (cityBuildQueue) then
-					local constructionTypes = cityBuildQueue:GetConstructionsAtLocation(plotID);
-					for _, type in ipairs(constructionTypes) do
-						local construction = GameInfo.Buildings[type];
-						local name = GameInfo.Buildings[construction.BuildingType].Name;
-						table.insert(new_data.Constructions, name);
-					end
-				end
-			end
-			if (new_data.IsCity == true or new_data.DistrictID == -1) then
-				for row in GameInfo.Yields() do
-					local yield = plot:GetYield(row.Index);
-					if (yield > 0) then
-						new_data.Yields[row.YieldType] = yield;
-					end
-				end	
-			else
-				local plotOwner = plot:GetOwner();
-				local plotPlayer = Players[plotOwner];
-				local district = plotPlayer:GetDistricts():FindID(new_data.DistrictID);
-
-				for row in GameInfo.Yields() do
-					local yield = plot:GetYield(row.Index);
-					local workers = plot:GetWorkerCount();
-					if (yield > 0 and workers > 0) then
-						yield = yield * workers;
-						new_data.Yields[row.YieldType] = yield;
-					end
-
-					local districtYield = district:GetYield(row.Index);
-					if (districtYield > 0) then
-						new_data.DistrictYields[row.YieldType] = districtYield;
-					end
-
-				end									
-			end
-
-			View(new_data, bIsUpdate);
-		end
-	end -- If different plot as last frame
+	if m_isValidPlot==false then
+		ClearView();
+		return;
+	end
+		
+	-- Here we go, grab that data for the plot.
+	local kPlotData :table = FetchData(pPlot);	
+	FetchAdditionalData(pPlot, kPlotData);
+	
+	View( kPlotData );	
 end
 
 
 -- ===========================================================================
-function RealizeNewPlotTooltipMouse( bIsUpdate:boolean )
+-- TODO: Fix this up as it's a bit aribtrary as to what is "data" and what is "additional data"
+-- ===========================================================================
+function FetchAdditionalData( pPlot:table, kPlotData:table )
+
+	if pPlot:IsNationalPark() then
+		kPlotData.NationalPark = pPlot:GetNationalParkName();
+	else
+		kPlotData.NationalPark = "";
+	end
+				
+	local plotId = pPlot:GetIndex();
+
+	if (kPlotData.OwnerCity) then
+		kPlotData.OwningCityName = kPlotData.OwnerCity:GetName();
+
+		local eDistrictType = pPlot:GetDistrictType();
+		if (eDistrictType) then
+			local cityDistricts = kPlotData.OwnerCity:GetDistricts();
+			if (cityDistricts) then
+				if (cityDistricts:IsPillaged(eDistrictType, plotId)) then
+					kPlotData.DistrictPillaged = true;
+				end
+				if (cityDistricts:IsComplete(eDistrictType, plotId)) then
+					kPlotData.DistrictComplete = true;
+				end
+			end
+		end
+
+		local cityBuildings = kPlotData.OwnerCity:GetBuildings();
+		if (cityBuildings) then
+			local buildingTypes = cityBuildings:GetBuildingsAtLocation(plotId);
+			for _, type in ipairs(buildingTypes) do
+				local building = GameInfo.Buildings[type];
+				table.insert(kPlotData.BuildingTypes, type);
+				local name = GameInfo.Buildings[building.BuildingType].Name;
+				table.insert(kPlotData.BuildingNames, name);
+				local bPillaged = cityBuildings:IsPillaged(type);
+				table.insert(kPlotData.BuildingsPillaged, bPillaged);
+			end
+			if (cityBuildings:HasBuilding(pPlot:GetWonderType())) then
+				kPlotData.WonderComplete = true;
+			end
+		end
+
+		local cityBuildQueue = kPlotData.OwnerCity:GetBuildQueue();
+		if (cityBuildQueue) then
+			local constructionTypes = cityBuildQueue:GetConstructionsAtLocation(plotID);
+			for _, type in ipairs(constructionTypes) do
+				local construction = GameInfo.Buildings[type];
+				local name = GameInfo.Buildings[construction.BuildingType].Name;
+				table.insert(kPlotData.Constructions, name);
+			end
+		end
+	end
+
+	-- Plot yields
+	if GameCapabilities.HasCapability("CAPABILITY_DISPLAY_PLOT_YIELDS") then
+		if (kPlotData.IsCity == true or kPlotData.DistrictID == -1) then
+			for row in GameInfo.Yields() do
+				local yield = pPlot:GetYield(row.Index);
+				if (yield > 0) then
+					kPlotData.Yields[row.YieldType] = yield;
+				end
+			end	
+		else
+			local plotOwner = pPlot:GetOwner();
+			local plotPlayer = Players[plotOwner];
+			local district = plotPlayer:GetDistricts():FindID(kPlotData.DistrictID);
+			if district ~= nil then
+				for row in GameInfo.Yields() do
+					local yield = pPlot:GetYield(row.Index);
+					local workers = pPlot:GetWorkerCount();
+					if (yield > 0 and workers > 0) then
+						yield = yield * workers;
+						kPlotData.Yields[row.YieldType] = yield;
+					end
+
+					local districtYield = district:GetYield(row.Index);
+					if (districtYield > 0) then
+						kPlotData.DistrictYields[row.YieldType] = districtYield;
+					end
+
+				end
+			end
+		end
+	end
+end
+
+
+-- ===========================================================================
+function RealizeNewPlotTooltipMouse()
 	local plotId :number = UI.GetCursorPlotID();
-	ShowPlotInfo( plotId, bIsUpdate );
+	ShowPlotInfo( plotId );
 	
 	RealizePositionAt( UIManager:GetMousePos() );
+end
+
+-- ===========================================================================
+--	Lua Event
+-- ===========================================================================
+function OnPlotInfoUpdate()	
+	m_plotId = -1;	-- Force invalidation of the current plot ID.
+	RealizeNewPlotTooltipMouse();
 end
 
 -- ===========================================================================
@@ -839,6 +876,8 @@ end
 
 -- ===========================================================================
 function OnShowLeaderScreen()
+    -- stop any existing leader animation sounds, as we're about to show a new one
+    UI.PlaySound("Stop_Leader_VO_SFX");
 	m_isActive = false;
 	ClearView();
 end
@@ -874,12 +913,28 @@ function OnUpdateUI( type:number, tag:string, iData1:number, iData2:number, strD
 end
 
 -- ===========================================================================
---	Context DESTRUCTOR
+--	UI Callback
+--	DESTRUCTOR
 -- ===========================================================================
 function OnShutdown()
 	-- Cache values for hotloading...
 	LuaEvents.GameDebug_AddValue("PlotToolTip", "m_isActive", m_isActive );
 	TTManager:RemoveToolTipDisplayCallback( OnToolTipShow );
+
+	-- Unsubscribe so no dangling contexts existing when hotload creates new instance.
+	Events.BeginWonderReveal.Remove( OnBeginWonderReveal );
+	Events.HideLeaderScreen.Remove( OnHideLeaderScreen );	
+	Events.ShowLeaderScreen.Remove( OnShowLeaderScreen );
+	Events.SystemUpdateUI.Remove( OnUpdateUI );
+	
+	LuaEvents.GameDebug_Return.Remove( OnGameDebugReturn );
+	LuaEvents.PlotInfo_UpdatePlotTooltip.Remove( OnPlotInfoUpdate );
+	LuaEvents.Tutorial_PlotToolTipsOn.Remove( OnTutorialTipsOn );
+	LuaEvents.Tutorial_PlotToolTipsOff.Remove( OnTutorialTipsOff );
+	LuaEvents.WorldInput_DragMapBegin.Remove( OnDragMapBegin );
+	LuaEvents.WorldInput_DragMapEnd.Remove( OnDragMapEnd );
+	LuaEvents.WorldInput_TouchPlotTooltipShow.Remove( OnTouchPlotTooltipShow );
+	LuaEvents.WorldInput_TouchPlotTooltipHide.Remove( OnTouchPlotTooltipHide );	
 end
 
 -- ===========================================================================
@@ -959,6 +1014,8 @@ function Initialize()
 
 	m_isShowDebug = (Options.GetAppOption("Debug", "EnableDebugPlotInfo") == 1);
 	
+	m_isWorldBuilder = GameConfiguration.IsWorldBuilderEditor();
+
 	m_isActive = true;
 	m_lastMouseMoveTime = nil;
 
@@ -978,12 +1035,12 @@ function Initialize()
 	
 	-- LUA Events
 	LuaEvents.GameDebug_Return.Add( OnGameDebugReturn );			-- hotloading help
+	LuaEvents.PlotInfo_UpdatePlotTooltip.Add( OnPlotInfoUpdate );
 	LuaEvents.Tutorial_PlotToolTipsOn.Add( OnTutorialTipsOn );
 	LuaEvents.Tutorial_PlotToolTipsOff.Add( OnTutorialTipsOff );
 	LuaEvents.WorldInput_DragMapBegin.Add( OnDragMapBegin );
 	LuaEvents.WorldInput_DragMapEnd.Add( OnDragMapEnd );
 	LuaEvents.WorldInput_TouchPlotTooltipShow.Add( OnTouchPlotTooltipShow );
-	LuaEvents.WorldInput_TouchPlotTooltipHide.Add( OnTouchPlotTooltipHide );
-	LuaEvents.PlotInfo_UpdatePlotTooltip.Add( RealizeNewPlotTooltipMouse );
+	LuaEvents.WorldInput_TouchPlotTooltipHide.Add( OnTouchPlotTooltipHide );	
 end
 Initialize();

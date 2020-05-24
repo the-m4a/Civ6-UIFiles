@@ -1,7 +1,4 @@
--- ===========================================================================
---	Notification Panel	
--- ===========================================================================
-
+-- Copyright 2017-2019, Firaxis Games
 include( "ToolTipHelper" );	
 include( "InstanceManager" );
 
@@ -17,8 +14,8 @@ local m_debugNotificationNum:number = 0;		-- (0) The # of fake notifications to 
 --	CONSTANTS
 -- ===========================================================================
 
-local COLOR_PIP_CURRENT						:number = 0xffffffff;
-local COLOR_PIP_OTHER						:number = 0xff3c3c3c;
+local COLOR_PIP_CURRENT = UI.GetColorValue("COLOR_WHITE");
+local COLOR_PIP_OTHER						:number = UI.GetColorValueFromHexLiteral(0xff3c3c3c);
 local DEBUG_NOTIFICATION_TYPE				:number = 999999;
 local SIZE_PIP								:number = 12;
 local SIZE_TOP_SPACE_Y						:number = 140;
@@ -117,6 +114,9 @@ function RegisterHandlers()
 	-- Add the table of function handlers for each type of notification	
 	g_notificationHandlers[DEBUG_NOTIFICATION_TYPE]									= MakeDefaultHandlers();	--DEBUG
 	g_notificationHandlers[NotificationTypes.DEFAULT]								= MakeDefaultHandlers();	--DEFAULT
+	g_notificationHandlers[NotificationTypes.BARBARIANS_SIGHTED]                    = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.NEW_BARBARIAN_CAMP]                    = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CAPITAL_LOST]							= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CHOOSE_ARTIFACT_PLAYER]				= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CHOOSE_BELIEF]							= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CHOOSE_CITY_PRODUCTION]				= MakeDefaultHandlers();
@@ -124,95 +124,121 @@ function RegisterHandlers()
 	g_notificationHandlers[NotificationTypes.CHOOSE_PANTHEON]						= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CHOOSE_RELIGION]						= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CHOOSE_TECH]							= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CITY_LOW_AMENITIES]					= MakeDefaultHandlers();	
 	g_notificationHandlers[NotificationTypes.CLAIM_GREAT_PERSON]					= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.COMMAND_UNITS]							= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CITY_BESIEGED_BY_OTHER_PLAYER]			= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CITY_FOOD_FOCUS]			            = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CITY_LOW_AMENITIES]					= MakeDefaultHandlers();	
 	g_notificationHandlers[NotificationTypes.CITY_RANGE_ATTACK]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CITY_STARVING]				            = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CITYSTATE_QUEST_COMPLETED]			    = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CIVIC_BOOST]							= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.CIVIC_DISCOVERED]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.COMMAND_UNITS]							= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CONSIDER_GOVERNMENT_CHANGE]			= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.CONSIDER_RAZE_CITY]					= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.DIPLOMACY_SESSION]			            = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.DISCOVER_CONTINENT]					= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.FILL_CIVIC_SLOT]						= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.GIVE_INFLUENCE_TOKEN]					= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.HOUSING_PREVENTING_GROWTH]             = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.PLAYER_DEFEATED]				        = MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.PLAYER_MET]			                = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.REBELLION]				                = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.RELIC_CREATED]				            = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.ROADS_UPGRADED]						= MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_CAPTURED]                          = MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.SPY_CHOOSE_DRAGNET_PRIORITY]			= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.SPY_CHOOSE_ESCAPE_ROUTE]				= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.SPY_KILLED]				            = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.TREASURY_BANKRUPT]				        = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.HOUSING_PREVENTING_GROWTH]             = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.BARBARIANS_SIGHTED]                    = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CAPITAL_LOST]							= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_PLUNDERED]                 = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CITY_STARVING]				            = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CITY_FOOD_FOCUS]			            = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CITYSTATE_QUEST_COMPLETED]			    = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_CAPACITY_INCREASED]	    = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.RELIC_CREATED]				            = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.REBELLION]				                = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.PLAYER_DEFEATED]				        = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.DISCOVER_CONTINENT]					= MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.UNIT_PROMOTION_AVAILABLE]              = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.WONDER_COMPLETED]                      = MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.ROADS_UPGRADED]						= MakeDefaultHandlers();
-
-    g_notificationHandlers[NotificationTypes.SPY_HEIST_GREAT_WORK]                  = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_RECRUIT_PARTISANS]                 = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_SABOTAGED_PRODUCTION]              = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_SIPHONED_FUNDS]                    = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_STOLE_TECH_BOOST]                  = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_DISRUPTED_ROCKETRY]                = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_MISSION_FAILED]                    = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_CAPTURED]                          = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_MISSION_ABORTED]                   = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_COUNTERSPY_PROMOTED]               = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_CITY_SOURCES_GAINED]               = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_ESCAPED_CAPTURE]                   = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_LISTENING_POST]                    = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_FLED_CITY]                         = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_COUNTERSPY_PROMOTED]               = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_DISRUPTED_ROCKETRY]                = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_ENEMY_CAPTURED]                    = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_ENEMY_DISRUPTED_ROCKETRY]          = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_HEIST_GREAT_WORK]            = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_ENEMY_KILLED]                      = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_RECRUIT_PARTISANS]           = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_SABOTAGED_PRODUCTION]        = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_SIPHONED_FUNDS]              = MakeDefaultHandlers();
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_STOLE_TECH_BOOST]            = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_ENEMY_DISRUPTED_ROCKETRY]          = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_ENEMY_CAPTURED]                    = MakeDefaultHandlers();
-    g_notificationHandlers[NotificationTypes.SPY_ENEMY_KILLED]                      = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_ESCAPED_CAPTURE]                   = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_FLED_CITY]                         = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_HEIST_GREAT_WORK]                  = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.SPY_KILLED]				            = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_LISTENING_POST]                    = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_MISSION_ABORTED]                   = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_MISSION_FAILED]                    = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_RECRUIT_PARTISANS]                 = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_SABOTAGED_PRODUCTION]              = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_SIPHONED_FUNDS]                    = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.SPY_STOLE_TECH_BOOST]                  = MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.TECH_BOOST]							= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CIVIC_BOOST]							= MakeDefaultHandlers();
 	g_notificationHandlers[NotificationTypes.TECH_DISCOVERED]						= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CIVIC_DISCOVERED]						= MakeDefaultHandlers();
-	g_notificationHandlers[NotificationTypes.CITY_BESIEGED_BY_OTHER_PLAYER]			= MakeDefaultHandlers();
-    
+	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_CAPACITY_INCREASED]	    = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_PLUNDERED]                 = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.TREASURY_BANKRUPT]				        = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.UNIT_PROMOTION_AVAILABLE]              = MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_1]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_2]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_3]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_4]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_5]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_6]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_7]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_8]						= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_9]						= MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.WONDER_COMPLETED]                      = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.MY_CULTURE_VICTORY_SOON]			    = MakeDefaultHandlers();
+    g_notificationHandlers[NotificationTypes.MY_DOMINANT_CULTURE]					= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_YOURTURN]					= MakeDefaultHandlers();
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_UNSEENCOMPLETE]			= MakeDefaultHandlers();
+
 	-- Custom function handlers for the "Activate" signal:	
 	g_notificationHandlers[DEBUG_NOTIFICATION_TYPE].Activate						= OnDebugActivate;
 	g_notificationHandlers[NotificationTypes.CHOOSE_ARTIFACT_PLAYER].Activate		= OnChooseArtifactPlayerActivate;
 	g_notificationHandlers[NotificationTypes.CHOOSE_BELIEF].Activate				= OnChooseReligionActivate;
 	g_notificationHandlers[NotificationTypes.CHOOSE_CITY_PRODUCTION].Activate		= OnChooseCityProductionActivate;	
 	g_notificationHandlers[NotificationTypes.CHOOSE_CIVIC].Activate					= OnChooseCivicActivate;	
-	g_notificationHandlers[NotificationTypes.CHOOSE_PANTHEON].Activate				= OnChooseReligionActivate;	
+	g_notificationHandlers[NotificationTypes.CHOOSE_PANTHEON].Activate				= OnChoosePantheonActivate;	
 	g_notificationHandlers[NotificationTypes.CHOOSE_RELIGION].Activate				= OnChooseReligionActivate;	
 	g_notificationHandlers[NotificationTypes.CHOOSE_TECH].Activate					= OnChooseTechActivate;	
+	g_notificationHandlers[NotificationTypes.CITY_RANGE_ATTACK].Activate			= OnCityRangeAttack;
+	g_notificationHandlers[NotificationTypes.CIVIC_BOOST].Activate					= OnCivicBoostActivateNotification;
+	g_notificationHandlers[NotificationTypes.CIVIC_DISCOVERED].Activate				= OnCivicDiscoveredActivateNotification;
 	g_notificationHandlers[NotificationTypes.CLAIM_GREAT_PERSON].Activate			= OnClaimGreatPersonActivate;	
 	g_notificationHandlers[NotificationTypes.COMMAND_UNITS].Activate				= OnCommandUnitsActivate;
-	g_notificationHandlers[NotificationTypes.CITY_RANGE_ATTACK].Activate			= OnCityRangeAttack;
 	g_notificationHandlers[NotificationTypes.CONSIDER_GOVERNMENT_CHANGE].Activate	= OnConsiderGovernmentChangeActivate;	
 	g_notificationHandlers[NotificationTypes.CONSIDER_RAZE_CITY].Activate			= OnConsiderRazeCityActivate;	
 	g_notificationHandlers[NotificationTypes.DIPLOMACY_SESSION].Activate            = OnDiplomacySessionActivate;
+	g_notificationHandlers[NotificationTypes.DISCOVER_CONTINENT].Activate			= OnDiscoverContinentActivateNotification;
 	g_notificationHandlers[NotificationTypes.FILL_CIVIC_SLOT].Activate				= OnFillCivicSlotActivate;	
 	g_notificationHandlers[NotificationTypes.GIVE_INFLUENCE_TOKEN].Activate			= OnGiveInfluenceTokenActivate;	
+	g_notificationHandlers[NotificationTypes.PLAYER_DEFEATED].Activate				= OnLookAtActivate;
+	g_notificationHandlers[NotificationTypes.RELIC_CREATED].Activate	            = OnRelicCreatedActivateNotification;
 	g_notificationHandlers[NotificationTypes.SPY_CHOOSE_DRAGNET_PRIORITY].Activate	= OnChooseEscapeRouteActivate;
 	g_notificationHandlers[NotificationTypes.SPY_CHOOSE_ESCAPE_ROUTE].Activate		= OnChooseEscapeRouteActivate;	
-	g_notificationHandlers[NotificationTypes.PLAYER_DEFEATED].Activate				= OnLookAtActivate;
-	g_notificationHandlers[NotificationTypes.DISCOVER_CONTINENT].Activate			= OnDiscoverContinentActivateNotification;
 	g_notificationHandlers[NotificationTypes.TECH_BOOST].Activate					= OnTechBoostActivateNotification;
-	g_notificationHandlers[NotificationTypes.CIVIC_BOOST].Activate					= OnCivicBoostActivateNotification;
 	g_notificationHandlers[NotificationTypes.TECH_DISCOVERED].Activate				= OnTechDiscoveredActivateNotification;
-	g_notificationHandlers[NotificationTypes.CIVIC_DISCOVERED].Activate				= OnCivicDiscoveredActivateNotification;
+    g_notificationHandlers[NotificationTypes.MY_CULTURE_VICTORY_SOON].Activate      = OnLaunchWorldRankings;
+    g_notificationHandlers[NotificationTypes.MY_DOMINANT_CULTURE].Activate			= OnLaunchWorldRankings;
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_YOURTURN].Activate			= OnPBCYourTurnActivate;
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_UNSEENCOMPLETE].Activate	= OnPBCUnseenCompleteActivate;
+
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_1].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_2].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_3].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_4].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_5].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_6].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_7].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_8].Activate				= OnUserNotificationActivate;
+	g_notificationHandlers[NotificationTypes.USER_DEFINED_9].Activate				= OnUserNotificationActivate;	
 
 	-- Sound to play when added
 	g_notificationHandlers[NotificationTypes.SPY_KILLED].AddSound			        = "ALERT_NEGATIVE";	
 	g_notificationHandlers[NotificationTypes.TREASURY_BANKRUPT].AddSound   	        = "ALERT_NEGATIVE";	
 	g_notificationHandlers[NotificationTypes.HOUSING_PREVENTING_GROWTH].AddSound    = "ALERT_NEUTRAL";	
 	g_notificationHandlers[NotificationTypes.BARBARIANS_SIGHTED].AddSound           = "ALERT_NEGATIVE";
+	g_notificationHandlers[NotificationTypes.NEW_BARBARIAN_CAMP].AddSound           = "ALERT_NEGATIVE";
 	g_notificationHandlers[NotificationTypes.CAPITAL_LOST].AddSound					= "ALERT_NEUTRAL";
 	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_PLUNDERED].AddSound        = "ALERT_NEGATIVE";
 	g_notificationHandlers[NotificationTypes.CITY_BESIEGED_BY_OTHER_PLAYER].AddSound= "ALERT_NEGATIVE";
@@ -222,8 +248,8 @@ function RegisterHandlers()
 	g_notificationHandlers[NotificationTypes.CITYSTATE_QUEST_COMPLETED].AddSound	= "ALERT_POSITIVE";	
 	g_notificationHandlers[NotificationTypes.TRADE_ROUTE_CAPACITY_INCREASED].AddSound = "ALERT_POSITIVE";	
 
-	g_notificationHandlers[NotificationTypes.RELIC_CREATED].AddSound = "NOTIFICATION_MISC_POSITIVE";
-	g_notificationHandlers[NotificationTypes.REBELLION].AddSound = "NOTIFICATION_REBELLION";
+	g_notificationHandlers[NotificationTypes.RELIC_CREATED].AddSound				= "NOTIFICATION_MISC_POSITIVE";
+	g_notificationHandlers[NotificationTypes.REBELLION].AddSound					= "NOTIFICATION_REBELLION";
     
     g_notificationHandlers[NotificationTypes.UNIT_PROMOTION_AVAILABLE].AddSound     = "UNIT_PROMOTION_AVAILABLE";
     g_notificationHandlers[NotificationTypes.WONDER_COMPLETED].AddSound             = "NOTIFICATION_OTHER_CIV_BUILD_WONDER";
@@ -249,8 +275,11 @@ function RegisterHandlers()
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_STOLE_TECH_BOOST].AddSound   = "NOTIFICATION_ESPIONAGE_OP_FAILED";
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_DISRUPTED_ROCKETRY].AddSound = "NOTIFICATION_ESPIONAGE_OP_FAILED";
     g_notificationHandlers[NotificationTypes.SPY_ENEMY_CAPTURED].AddSound           = "NOTIFICATION_ESPIONAGE_OP_SUCCESS";
-    g_notificationHandlers[NotificationTypes.SPY_ENEMY_KILLED].AddSound             = "NOTIFICATION_ESPIONAGE_OP_SUCCESS";
-    
+    g_notificationHandlers[NotificationTypes.SPY_ENEMY_KILLED].AddSound				= "NOTIFICATION_ESPIONAGE_OP_SUCCESS";
+
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_YOURTURN].AddSound			= "ALERT_POSITIVE";
+	g_notificationHandlers[NotificationTypes.PLAYBYCLOUD_UNSEENCOMPLETE].AddSound	= "ALERT_POSITIVE";
+	
 	-- Custom function handlers for the "Add" signal:
 	g_notificationHandlers[DEBUG_NOTIFICATION_TYPE].Add								= OnDebugAdd;
     g_notificationHandlers[NotificationTypes.PLAYER_MET].Add                        = OnMetCivAddNotification;
@@ -301,8 +330,6 @@ function ProcessStackSizes()
 			Controls.RailOffsetAnim:Play();
 		end
 	end
-
-	Controls.ScrollStack:ReprocessAnchoring();
 end
 
 -- ===========================================================================
@@ -365,16 +392,22 @@ function RealizeNotificationSize( playerID:number, notificationID:number )
 	local X_EXTRA			:number = 20;	-- Needs to cover right (collapsed) side button too.
 	local X_EXTRA_MOUSE_OUT	:number = 70;
 	local X_AREA			:number = 215;
+	local Y_EXTRA			:number = 42;	-- Includes title area as it's a bit variable (whether # is shown or not)
 
 	-- Set the extends/bounds of the ExpandedArea of the notification stack
 	local notificationEntry:NotificationType = GetNotificationEntry( playerID, notificationID );
 	if (notificationEntry ~= nil) and (notificationEntry.m_Instance ~= nil) then
-		notificationEntry.m_Instance.ExpandedArea:SetSizeX( notificationEntry.m_maxWidth + X_EXTRA);
-		notificationEntry.m_Instance.NotificationSlide:SetEndVal( ((notificationEntry.m_maxWidth - X_AREA) + X_EXTRA ), 0 );
-		notificationEntry.m_Instance.MouseOutArea:SetSizeX(notificationEntry.m_maxWidth + X_EXTRA_MOUSE_OUT);
-		if notificationEntry.m_Instance.m_MouseIn and notificationEntry.m_Instance.NotificationSlide:IsStopped() then
-			notificationEntry.m_Instance.NotificationSlide:SetToEnd();
+		local instance:table = notificationEntry.m_Instance;
+
+		instance.ExpandedArea:SetSizeX( notificationEntry.m_maxWidth + X_EXTRA);
+		instance.NotificationSlide:SetEndVal( ((notificationEntry.m_maxWidth - X_AREA) + X_EXTRA ), 0 );
+		instance.MouseOutArea:SetSizeX(notificationEntry.m_maxWidth + X_EXTRA_MOUSE_OUT);
+		if instance.m_MouseIn and instance.NotificationSlide:IsStopped() then
+			instance.NotificationSlide:SetToEnd();
 		end
+
+		local notificationHeight:number = instance.Summary:GetSizeY() + instance.PagePipStack:GetSizeY() + Y_EXTRA;
+		instance.ExpandedArea:SetSizeY( notificationHeight );
 	end
 end
 
@@ -567,7 +600,7 @@ function ReleaseNotificationEntry( playerID:number, notificationID:number, isShu
 
 		end
 	else
-		error("For player ("..tostring(playerID)..") unable to find notification ("..tostring(notificationID)..") for release.");
+		UI.DataError("For player ("..tostring(playerID)..") unable to find notification ("..tostring(notificationID)..") for release.");
 	end
 end
 
@@ -638,8 +671,11 @@ function LookAtNotification( pNotification:table )
 				if (not isLookedAt) then 
 					UI.LookAtPlot(pCity:GetX(), pCity:GetY());
 				end
-				-- Select it.
-				UI.SelectCity(pCity);
+
+				if targetPlayerID == Game.GetLocalPlayer() then
+					-- Select it.
+					UI.SelectCity(pCity);
+				end
 			end
 		end
 	end
@@ -678,7 +714,7 @@ function OnDefaultAddNotification( pNotification:table )
 	
 	local typeName				:string				= pNotification:GetTypeName();
 	if typeName == nil then
-		UI.DataError("NIL notification type name for notifcation ID:"..tostring(pNotification:GetID()));
+		UI.DataError("NIL notification type name for notification ID:"..tostring(pNotification:GetID()));
 		return;
 	end
 
@@ -846,27 +882,36 @@ function GetMaxWidth( notificationEntry:NotificationType , pNotification:table )
 	local widthTitle			:number = 0; -- Width of the notification title
 	local widthSummary			:number = 0; -- Width of the notification summary
 	local titleWidthPadding		:number = 0; -- Calculated, adds the width of the arrows and number label
-	local summaryWidthPadding	:number = 20;
-
+	local summaryWidthPadding	:number = 0;
+	local ARROW_PADDING_WIDTH	:number = 5;
+	local instance				:table= nil;
+	
 	if notificationEntry and notificationEntry.m_Instance then
-		-- Seeing if the arrow is hidden is a quick way to check that there's more than one notification in this stack
-		if notificationEntry.m_Instance.LeftArrow:IsVisible() then
-			titleWidthPadding = notificationEntry.m_Instance.TitleCount:GetSizeX();
-			summaryWidthPadding = (notificationEntry.m_Instance.LeftArrow:GetSizeX() * 2) + 50;
-		else 
-			-- Don't pad out the stack since there aren't extra buttons or a title count
-			summaryWidthPadding = 0;
-		end
-		widthTitle = notificationEntry.m_Instance.TitleInfo:GetSizeX() + titleWidthPadding;
-		widthSummary = notificationEntry.m_Instance.Summary:GetSizeX() + summaryWidthPadding;
-		if widthTitle > widthSummary then
-			return widthTitle, summaryWidthPadding;
-		else
-			return widthSummary, summaryWidthPadding;
-		end
+		instance = notificationEntry.m_Instance;
+	else
+		return 0,0;
 	end
-	return 0, 0;
+
+	-- Seeing if the arrow is hidden is a quick way to check that there's more than one notification in this stack
+	if instance.LeftArrow:IsVisible() then
+		titleWidthPadding = instance.TitleCount:GetSizeX();
+		summaryWidthPadding = (instance.LeftArrow:GetSizeX() * 2) + ARROW_PADDING_WIDTH;
+	else 
+		-- Don't pad out the stack since there aren't extra buttons or a title count
+		summaryWidthPadding = 0;
+	end
+
+	widthTitle = instance.TitleInfo:GetSizeX() + titleWidthPadding;
+	widthSummary = instance.Summary:GetSizeX() + summaryWidthPadding;
+		
+	if widthTitle > widthSummary then
+		return widthTitle, summaryWidthPadding;
+	end
+	
+	return widthSummary, summaryWidthPadding;	
 end
+
+-- ===========================================================================
 function RealizeMaxWidth( notificationEntry:NotificationType , pNotification:table )
 
 	if notificationEntry == nil or notificationEntry.m_Instance == nil then
@@ -926,7 +971,7 @@ function RealizeStandardNotification( playerID:number, notificationID:number )
 
 	if pNotification == nil then
 		if m_debugStrictRemoval then
-			alert("NIL Notification: ",playerID, notificationID );
+			UI.DataError("NIL Notification: ",playerID, notificationID );
 		end
 		return;
 	end
@@ -963,7 +1008,6 @@ function RealizeStandardNotification( playerID:number, notificationID:number )
 		notificationEntry.m_Instance.Count:SetText( tostring(count) );
 		notificationEntry.m_Instance.DismissStackButton:RegisterCallback( Mouse.eRClick,		function() TryDismissNotificationStack(playerID, notificationID); end );
 		notificationEntry.m_Instance.TitleCount:SetText( tostring(count) );
-		notificationEntry.m_Instance.TitleStack:ReprocessAnchoring();
 
 		notificationEntry.m_Instance.LeftArrow:RegisterCallback( Mouse.eLClick,		function() notificationEntry.m_kHandlers.OnPreviousSelect(pNotification); end );
 		notificationEntry.m_Instance.RightArrow:RegisterCallback( Mouse.eLClick,	function() notificationEntry.m_kHandlers.OnNextSelect(pNotification); end );
@@ -1027,6 +1071,7 @@ function OnDefaultTryDismissNotification( notificationEntry : NotificationType )
 		if (pNotification ~= nil) then
 			if (pNotification:CanUserDismiss()) then
 				NotificationManager.Dismiss( pNotification:GetPlayerID(), pNotification:GetID() );
+				UI.PlaySound("Play_UI_Click");
 			end
 		end
 	end
@@ -1242,6 +1287,15 @@ function OnConsiderRazeCityActivate( notificationEntry : NotificationType )
 end
 
 -- =======================================================================================
+-- Choose Pantheon Handlers
+-- =======================================================================================
+function OnChoosePantheonActivate( notificationEntry : NotificationType )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+        LuaEvents.NotificationPanel_OpenPantheonChooser();
+	end
+end
+
+-- =======================================================================================
 -- Choose Religion Handlers
 -- =======================================================================================
 function OnChooseReligionActivate( notificationEntry : NotificationType )
@@ -1274,6 +1328,43 @@ end
 function OnClaimGreatPersonActivate( notificationEntry : NotificationType )
 	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
 		LuaEvents.NotificationPanel_OpenGreatPeoplePopup();
+	end
+end
+
+-- =======================================================================================
+-- Launch World Rankings Handlers
+-- =======================================================================================
+function OnLaunchWorldRankings( notificationEntry : NotificationType )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+		LuaEvents.PartialScreenHooks_OpenWorldRankingsCulture();
+	end
+end
+
+-- =======================================================================================
+-- Play By Cloud Your Turn Notification Handler
+-- =======================================================================================
+function OnPBCYourTurnActivate( notificationEntry : NotificationType )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
+		if pNotification ~= nil then
+			local matchID :number = pNotification:GetValue("MatchID");
+			local matchName :string = pNotification:GetValue("MatchName");
+			LuaEvents.PBCNotificationPopup_ShowYourTurn(matchID, matchName);
+		end
+	end
+end
+
+-- =======================================================================================
+-- Play By Cloud Unseen Completed Game Notification Handler
+-- =======================================================================================
+function OnPBCUnseenCompleteActivate( notificationEntry : NotificationType )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
+		if pNotification ~= nil then
+			local matchID :number = pNotification:GetValue("MatchID");
+			local matchName :string = pNotification:GetValue("MatchName");
+			LuaEvents.PBCNotificationPopup_ShowUnseenComplete(matchID, matchName);
+		end
 	end
 end
 
@@ -1344,13 +1435,13 @@ end
 -- =======================================================================================
 -- Tech Discovered Handlers
 -- =======================================================================================
-function OnTechDiscoveredActivateNotification( notificationEntry : NotificationType, notificationID : number )
+function OnTechDiscoveredActivateNotification( notificationEntry : NotificationType, notificationID : number, isByUser : boolean )
 	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
 		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
 		if pNotification ~= nil then
 			local techIndex = pNotification:GetValue("TechIndex");
 			if(techIndex ~= nil) then
-				LuaEvents.NotificationPanel_ShowTechDiscovered(notificationEntry.m_PlayerID, techIndex);
+				LuaEvents.NotificationPanel_ShowTechDiscovered(notificationEntry.m_PlayerID, techIndex, isByUser);
 			end
 		end
 	end
@@ -1359,14 +1450,27 @@ end
 -- =======================================================================================
 -- Civic Discovered Handlers
 -- =======================================================================================
-function OnCivicDiscoveredActivateNotification( notificationEntry : NotificationType, notificationID : number )
+function OnCivicDiscoveredActivateNotification( notificationEntry : NotificationType, notificationID : number, isByUser : boolean  )
 	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
 		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
 		if pNotification ~= nil then
 			local civicIndex = pNotification:GetValue("CivicIndex");
 			if(civicIndex ~= nil) then
-				LuaEvents.NotificationPanel_ShowCivicDiscovered(notificationEntry.m_PlayerID, civicIndex);
+				LuaEvents.NotificationPanel_ShowCivicDiscovered(notificationEntry.m_PlayerID, civicIndex, isByUser);
 			end
+		end
+	end
+end
+
+function OnRelicCreatedActivateNotification( notificationEntry : NotificationType, notificationID : number )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
+		if pNotification ~= nil then
+			local cityX = pNotification:GetValue("CityX");
+			local cityY = pNotification:GetValue("CityY");
+			local buildingID = pNotification:GetValue("BuildingID");
+			local greatWorkIndex = pNotification:GetValue("GreatWorkIndex");
+			LuaEvents.NotificationPanel_ShowRelicCreated(notificationEntry.m_PlayerID, -1, cityX, cityY, buildingID, greatWorkIndex);
 		end
 	end
 end
@@ -1377,6 +1481,17 @@ function OnMetCivAddNotification( pNotification:table )
         UI.PlaySound("NOTIFICATION_MISC_NEUTRAL"); 
     end
 	OnDefaultAddNotification( pNotification );
+end
+
+-- =======================================================================================
+function OnUserNotificationActivate( notificationEntry : NotificationType, notificationID:number, activatedByUser:boolean )
+	if (notificationEntry ~= nil and notificationEntry.m_PlayerID == Game.GetLocalPlayer()) then
+		local pNotification :table = GetActiveNotificationFromEntry(notificationEntry, notificationID);
+		if pNotification ~= nil then
+			LookAtNotification( pNotification );
+			LuaEvents.NotificationPanel_UserNotificationActivate( pNotification:GetPlayerID(), pNotification:GetID() );
+		end
+	end
 end
 
 -- =======================================================================================
@@ -1464,8 +1579,7 @@ function OnNotificationAdded( playerID:number, notificationID:number )
 						UI.PlaySound(handler.AddSound);
 					end
 				end
-				ProcessStackSizes();
-				RealizeNotificationSize(playerID, notificationID);
+				ProcessStackSizes();				
 			end
 		else
 			-- Sanity check
@@ -1486,7 +1600,7 @@ function OnNotificationDismissed( playerID:number, notificationID:number )
 			--print("OnNotificationDismissed():",notificationID);	--debug
 			local handler = notificationEntry.m_kHandlers;
 			handler.Dismiss( playerID, notificationID );
-		end
+		end		
 		ProcessStackSizes();
 		RealizeNotificationSize(playerID, notificationID);
 	end
@@ -1553,12 +1667,14 @@ end
 -- ===========================================================================
 function OnLuaActivateNotification( pNotification:table )
 	if (pNotification ~= nil and pNotification:IsValidForPhase()) then
-		local playerID = pNotification:GetPlayerID();
-		local notificationID = pNotification:GetID();
-		local notificationEntry = GetNotificationEntry( playerID, notificationID );
-		if (notificationEntry ~= nil) then
-			local handler = notificationEntry.m_kHandlers;
-			handler.Activate( notificationEntry );
+		local playerID			:number = pNotification:GetPlayerID();
+		local notificationID	:number = pNotification:GetID();
+		local kNotificationEntry:NotificationType  = GetNotificationEntry( playerID, notificationID );		
+
+		if (kNotificationEntry ~= nil) then
+			local handler			:NotificationHandler = kNotificationEntry.m_kHandlers;			
+			local activatedByUser	:boolean = true;	-- Assume this request came from the user since raised by another context.
+			handler.Activate( kNotificationEntry, notificationID, activatedByUser );
 		end
 	end
 end
@@ -1592,12 +1708,8 @@ end
 -- ===========================================================================
 function Resize()
 	m_screenX, m_screenY	= UIManager:GetScreenSizeVal();
-	Controls.RailOffsetAnim:ReprocessAnchoring();
-	Controls.RailAnim:ReprocessAnchoring();
-
-	-- force an update
-	m_lastStackSize = 0;
-
+	
+	m_lastStackSize = 0;	-- force an update
 	ProcessStackSizes();
 end
 
@@ -1607,15 +1719,6 @@ end
 function OnUpdateUI( type:number, tag:string, iData1:number, iData2:number, strData1:string)
 	if type == SystemUpdateUI.ScreenResize then
 		Resize();
-	end
-end
-
--- ===========================================================================
---	UI Event
--- ===========================================================================
-function OnInit( isReload:boolean )
-	if isReload then			
-		NotificationManager.RestoreVisualState(Game.GetLocalPlayer());	-- Restore the notifications
 	end
 end
 
@@ -1643,6 +1746,19 @@ end
 --	UI Event
 -- ===========================================================================
 function OnShutdown()
+	Events.NotificationAdded.Remove(				OnNotificationAdded );
+	Events.NotificationDismissed.Remove(			OnNotificationDismissed );
+	Events.NotificationRefreshRequested.Remove(	OnNotificationRefreshRequested );
+	Events.NotificationActivated.Remove(			OnNotificationActivated );
+
+	Events.UnitKilledInCombat.Remove( OnUnitKilledInCombat );
+	Events.SystemUpdateUI.Remove( OnUpdateUI );
+	Events.PhaseBegin.Remove( OnPhaseBegin );
+	Events.LocalPlayerChanged.Remove( OnLocalPlayerChanged );
+	Events.InterfaceModeChanged.Remove(OnInterfaceModeChanged );	   
+	Events.LoadGameViewStateDone.Remove( OnLoadGameViewStateDone );
+
+	LuaEvents.ActionPanel_ActivateNotification.Remove( OnLuaActivateNotification );
 
 	ClearNotifications();
 	
@@ -1697,16 +1813,11 @@ function OnUnitKilledInCombat( targetUnit )
 end
 
 -- ===========================================================================
---	Setup
+--	Late initialize pattern; friendly for MODs.
 -- ===========================================================================
-function Initialize()
-	
+function LateInitialize()
+
 	RegisterHandlers();
-
-	ContextPtr:SetInitHandler( OnInit );
-	ContextPtr:SetShutdown( OnShutdown );
-
-	Controls.ScrollStack:RegisterSizeChanged( OnStackSizeChanged );
 
 	Events.NotificationAdded.Add(				OnNotificationAdded );
 	Events.NotificationDismissed.Add(			OnNotificationDismissed );
@@ -1714,18 +1825,32 @@ function Initialize()
 	Events.NotificationActivated.Add(			OnNotificationActivated );
 
 	Events.UnitKilledInCombat.Add( OnUnitKilledInCombat );
-
 	Events.SystemUpdateUI.Add( OnUpdateUI );
-
 	Events.PhaseBegin.Add( OnPhaseBegin );
-
 	Events.LocalPlayerChanged.Add( OnLocalPlayerChanged );
-
-	Events.InterfaceModeChanged.Add(		OnInterfaceModeChanged );
-
-    m_isLoadComplete = false;
+	Events.InterfaceModeChanged.Add(OnInterfaceModeChanged );	   
 	Events.LoadGameViewStateDone.Add( OnLoadGameViewStateDone );
 
 	LuaEvents.ActionPanel_ActivateNotification.Add( OnLuaActivateNotification );
+end
+
+-- ===========================================================================
+--	UI Event
+-- ===========================================================================
+function OnInit( isReload:boolean )
+	LateInitialize();
+	if isReload then			
+		NotificationManager.RestoreVisualState(Game.GetLocalPlayer());	-- Restore the notifications
+	end
+end
+
+-- ===========================================================================
+function Initialize()
+	ContextPtr:SetInitHandler( OnInit );
+	ContextPtr:SetShutdown( OnShutdown );
+
+	Controls.ScrollStack:RegisterSizeChanged( OnStackSizeChanged );
+
+	m_isLoadComplete = false;
 end
 Initialize();

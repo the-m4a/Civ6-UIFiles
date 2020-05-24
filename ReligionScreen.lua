@@ -1,8 +1,4 @@
--- ===========================================================================--	ReligionScreen
---	Customize and review religions.
---
---	Original Authors: Ed Beach, Sam Batista
--- ===========================================================================
+-- Copyright 2017-2019, Firaxis Games
 include("TabSupport");
 include("InstanceManager");
 include("ModalScreen_PlayerYieldsHelper");
@@ -23,8 +19,10 @@ local PADDING_TAB_BUTTON_TEXT:number = 55;
 local SIZE_BELIEF_ICON_SMALL:number = 32;
 local SIZE_BELIEF_ICON_LARGE:number = 64;
 local SIZE_RELIGION_ICON_SMALL:number = 22;
+local SIZE_RELIGION_ICON_MEDIUM:number = 50;
 local SIZE_RELIGION_ICON_LARGE:number = 100;
 local SIZE_RELIGION_ICON_HUGE:number = 270;
+local SIZE_UNIT_ICON_NONE_ALPHA:number = 0.3;
 local OFFSET_WORKING_TOWARDS_PANTHEON:number = 405;
 local OFFSET_CHOOSING_PANTHEON_BELIEFS:number = -10;
 local OFFSET_CHOOSING_RELIGION_BELIEFS:number = -10;
@@ -60,6 +58,7 @@ UNIT_ICON_TOOLTIPS["UNIT_GURU"] = {
 -- ===========================================================================
 --	SCREEN VARIABLES
 -- ===========================================================================
+local m_TopPanelConsideredHeight:number = 0;
 local m_Beliefs:table;
 local m_PendingBeliefs:table;
 local m_ReligionTabs:table; -- TabSupport
@@ -160,7 +159,7 @@ function UpdateTabs()
 	end
 
 	-- Create TabSupport object
-	m_ReligionTabs = CreateTabs( Controls.TabContainer, 42, 34, 0xFF331D05 );
+	m_ReligionTabs = CreateTabs( Controls.TabContainer, 42, 34, UI.GetColorValueFromHexLiteral(0xFF331D05) );
 
 	-- Create my pantheon/religion tab
 	local religionData:table;
@@ -434,13 +433,13 @@ end
 function SetBeliefSlotDisabled(beliefInst:table, bDisable:boolean)
 	beliefInst.BeliefButton:SetDisabled(bDisable);
 	if(bDisable) then
-		beliefInst.BeliefIcon:SetColor(0xFF808080);
-		beliefInst.BeliefLabel:SetColor(0xFF808080);
-		beliefInst.BeliefDescription:SetColor(0xFF808080);
+		beliefInst.BeliefIcon:SetColor(UI.GetColorValueFromHexLiteral(0xFF808080));
+		beliefInst.BeliefLabel:SetColor(UI.GetColorValueFromHexLiteral(0xFF808080));
+		beliefInst.BeliefDescription:SetColor(UI.GetColorValueFromHexLiteral(0xFF808080));
 	else
-		beliefInst.BeliefIcon:SetColor(0xFFFFFFFF);
-		beliefInst.BeliefLabel:SetColor(0xFFB2A797); 
-		beliefInst.BeliefDescription:SetColor(0xFFB2A797);
+		beliefInst.BeliefIcon:SetColor(UI.GetColorValue("COLOR_WHITE"));
+		beliefInst.BeliefLabel:SetColor(UI.GetColorValueFromHexLiteral(0xFFB2A797)); 
+		beliefInst.BeliefDescription:SetColor(UI.GetColorValueFromHexLiteral(0xFFB2A797));
 	end
 end
 
@@ -770,7 +769,7 @@ function SelectReligionBeliefs()
 		for _, beliefIndex in ipairs(religion.Beliefs) do
 			belief = GameInfo.Beliefs[beliefIndex];
 			local beliefInst:table = m_ExistingReligionBeliefsIM:GetInstance();
-			beliefInst.BeliefBG:SetColor(0xFFFFFFFF);
+			beliefInst.BeliefBG:SetColor(UI.GetColorValue("COLOR_WHITE"));
 			beliefInst.BeliefLabel:LocalizeAndSetText(Locale.ToUpper(belief.Name));
 			beliefInst.BeliefDescription:LocalizeAndSetText(belief.Description);
 			SetBeliefIcon(beliefInst.BeliefIcon, belief.BeliefType, SIZE_BELIEF_ICON_LARGE);
@@ -932,8 +931,8 @@ function SetReligionIcon(targetControl:table, religionType:string, iconSize:numb
 		Controls.PendingReligionImage:SetSizeVal(SIZE_RELIGION_ICON_HUGE, SIZE_RELIGION_ICON_HUGE);
 	end
 	if(religionColor == nil) then
-		targetControl:SetColor(0xFFFFFFFF);
-		Controls.PendingReligionImage:SetColor(0xFFFFFFFF);
+		targetControl:SetColor(UI.GetColorValue("COLOR_WHITE"));
+		Controls.PendingReligionImage:SetColor(UI.GetColorValue("COLOR_WHITE"));
 	else
 		targetControl:SetColor(UI.GetColorValue(religionColor));
 		Controls.PendingReligionImage:SetColor(UI.GetColorValue(religionColor));
@@ -1004,7 +1003,7 @@ function ViewReligion(religionType:number)
 
 	-- Update text and icons
 	SetBeliefIcon(Controls.ViewReligionPantheonIcon, belief.BeliefType, SIZE_BELIEF_ICON_LARGE);
-	SetReligionIcon(Controls.ViewReligionImage, religionData.ReligionType, SIZE_RELIGION_ICON_HUGE, religionData.Color);
+	SetReligionIcon(Controls.ViewReligionImage, religionData.ReligionType, SIZE_RELIGION_ICON_LARGE, religionData.Color);
 
 	Controls.CitiesHeader:LocalizeAndSetText(Locale.ToUpper("LOC_UI_RELIGION_CITIES"));
 	Controls.FollowersHeader:LocalizeAndSetText(Locale.ToUpper("LOC_UI_RELIGION_FOLLOWERS"));
@@ -1126,6 +1125,25 @@ function ViewReligion(religionType:number)
 				local iconString:string = "ICON_" .. row.UnitType .. "_PORTRAIT";
 				unitIconInst.UnitIcon:SetIcon(iconString);
 
+				-- Determine how many of these units do we own
+				local howMany:number = 0;
+				local pLocalPlayerUnits = localPlayer:GetUnits();
+				for _, pUnit in pLocalPlayerUnits:Members() do
+					if row.Index == pUnit:GetType() then
+						howMany = howMany + 1;
+					end
+				end
+				
+				-- Display how many we own or alpha out icons when we don't own any
+				if howMany <= 0 then
+					unitIconInst.UnitCount:SetHide(true);
+					unitIconInst.UnitIconBacking:SetAlpha(SIZE_UNIT_ICON_NONE_ALPHA);
+				else
+					unitIconInst.UnitCount:SetText(howMany);
+					unitIconInst.UnitCount:SetHide(false);
+					unitIconInst.UnitIconBacking:SetAlpha(1.0);
+				end
+
 				if buildQueue:CanProduce(row.UnitType, false, true) then
 					-- If we can currently produce set tooltip to normal description
 					if UNIT_ICON_TOOLTIPS[row.UnitType] and UNIT_ICON_TOOLTIPS[row.UnitType].canProduce then
@@ -1222,7 +1240,7 @@ function AddUnlockedBeliefs(religion)
 	for _, beliefIndex in ipairs(religion.Beliefs) do
 		belief = GameInfo.Beliefs[beliefIndex];
 		local beliefInst:table = m_ReligionBeliefsIM:GetInstance();
-		beliefInst.BeliefBG:SetColor(0xFFFFFFFF);
+		beliefInst.BeliefBG:SetColor(UI.GetColorValue("COLOR_WHITE"));
 		beliefInst.BeliefLabel:SetText(Locale.ToUpper(belief.Name));
 		beliefInst.BeliefDescription:LocalizeAndSetText(belief.Description);
 		SetBeliefIcon(beliefInst.BeliefIcon, belief.BeliefType, SIZE_BELIEF_ICON_LARGE);
@@ -1235,7 +1253,7 @@ function AddLockedBeliefs(religion)
 	local numLockedBeliefs:number = NUM_MAX_BELIEFS - table.count(religion.Beliefs);
 	for i = 1, numLockedBeliefs do
 		local beliefInst:table = m_ReligionBeliefsIM:GetInstance();
-		beliefInst.BeliefBG:SetColor(0xFF808080);
+		beliefInst.BeliefBG:SetColor(UI.GetColorValueFromHexLiteral(0xFF808080));
 		beliefInst.BeliefLabel:SetText(Locale.ToUpper(Locale.Lookup("LOC_UI_RELIGION_LOCKED_BELIEF")));
 		if religion.Founder == Game.GetLocalPlayer() then
 			beliefInst.BeliefDescription:LocalizeAndSetText("LOC_UI_RELIGION_LOCKED_BELIEF_DESCRIPTION");
@@ -1349,7 +1367,7 @@ function ViewAllReligions()
 			
 			religionInst.ReligionName:SetText(Locale.ToUpper(Game.GetReligion():GetName(religionInfo.Religion)));
 			
-			SetReligionIcon(religionInst.ReligionImage, religionData.ReligionType, SIZE_RELIGION_ICON_HUGE, religionData.Color);
+			SetReligionIcon(religionInst.ReligionImage, religionData.ReligionType, SIZE_RELIGION_ICON_MEDIUM, religionData.Color);
 
 			local numDominantCities:number = dominantCities[religionInfo.Religion];
 			if numDominantCities == nil then numDominantCities = 0; end
@@ -1418,7 +1436,9 @@ function Open()
 	end
 
 	-- From ModalScreen_PlayerYieldsHelper
-	RefreshYields();
+	if not RefreshYields() then
+		Controls.Vignette:SetSizeY(m_TopPanelConsideredHeight);
+	end
 
 	-- From Civ6_styles: FullScreenVignetteConsumer
 	Controls.ScreenAnimIn:SetToBeginning();
@@ -1521,6 +1541,17 @@ end
 function OnShutdown()
 	-- Cache values for hotloading...
 	LuaEvents.GameDebug_AddValue("ReligionScreen", "isHidden", ContextPtr:IsHidden());
+
+	Events.BeliefAdded.Remove(OnBeliefAdded);
+	Events.PantheonFounded.Remove(OnPantheonFounded);
+	Events.ReligionFounded.Remove(OnReligionFounded);
+	Events.LocalPlayerTurnEnd.Remove( OnLocalPlayerTurnEnd );
+	
+	LuaEvents.GameDebug_Return.Remove(OnGameDebugReturn);	
+	LuaEvents.LaunchBar_OpenReligionPanel.Remove(OnShowScreen);
+	LuaEvents.LaunchBar_CloseReligionPanel.Remove(OnClose);
+	LuaEvents.NotificationPanel_OpenReligionPanel.Remove(OnShowScreen);
+	LuaEvents.PantheonChooser_OpenReligionPanel.Remove(OnShowScreen);
 end
 
 -- ===========================================================================
@@ -1566,10 +1597,12 @@ function Initialize()
 	LuaEvents.LaunchBar_OpenReligionPanel.Add(OnShowScreen);
 	LuaEvents.LaunchBar_CloseReligionPanel.Add(OnClose);
 	LuaEvents.NotificationPanel_OpenReligionPanel.Add(OnShowScreen);
+	LuaEvents.PantheonChooser_OpenReligionPanel.Add(OnShowScreen);
 
 	Controls.ModalScreenTitle:SetText(Locale.ToUpper(TXT_SCREEN_TITLE));
 	Controls.ModalScreenClose:RegisterCallback(Mouse.eLClick, OnClose);
     Controls.ModalScreenClose:RegisterCallback(Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end); 
+	m_TopPanelConsideredHeight = Controls.Vignette:GetSizeY() - TOP_PANEL_OFFSET;
 
 end
 Initialize();

@@ -1,6 +1,6 @@
 ﻿-- ===========================================================================
 --	World Input
---	Copyright 2015-2016, Firaxis Games
+--	Copyright 2015-2018, Firaxis Games
 --
 --	Handle input that occurs within the 3D world.
 --
@@ -16,6 +16,95 @@ include("PopupDialog.lua");
 -- More interface-specific includes before the initialization
 
 -- ===========================================================================
+-- Horizontal shake tracker
+-- This works by creating two 'cells' with user-specified size around the center
+-- location for the detection.  As the user moves the mouse around, it keeps track
+-- of the unique cells the mouse has entered along with the time it entered. If 
+-- the mouse moves so far it is outside the cell regions, we re-locate the cell 
+-- regions to just keep the mouse contained.  If we detect a series of four cell 
+-- changes within the specified amount of time, we detect a shake gesture.
+-- ===========================================================================
+local m_ShakeTracker =
+{
+	m_nHistorySize = 4;
+	m_aHistory = {};
+	m_aTime = {};
+	m_i = 1;
+	
+	m_OffsetX = 0;
+	m_SizeX = 0;
+	m_ShakeTime = 0.5; --Only register shake if it happens within this number of seconds
+};
+
+function Shake_Setup( this : table, CenterX : number, SizeX : number )
+	this.m_SizeX = SizeX;
+	this.m_OffsetX = CenterX - (SizeX / 2);
+	Shake_Clear(this);
+end
+
+function Shake_Clear( this : table )
+	for i,v in ipairs(this.m_aHistory) do this.m_aHistory[i] = nil end
+	for i,v in ipairs(this.m_aTime) do this.m_aTime[i] = nil end
+	this.m_i = 0;
+end
+
+function Shake_ProcessMouse( this : table, MouseX : number )
+	MouseLocalX = math.floor( 2 * (MouseX - this.m_OffsetX) / this.m_SizeX );
+
+	if MouseLocalX < 0 then
+		this.m_OffsetX = MouseX;
+	end
+
+	if MouseLocalX >= 2 then
+		this.m_OffsetX = MouseX - this.m_SizeX;
+	end
+
+	if( MouseLocalX >= 0 and MouseLocalX < 2 ) then
+		CurrentCell = MouseLocalX;
+
+		if not(this.m_aHistory[this.m_i] == CurrentCell) then
+			this.m_i = this.m_i + 1;	
+			if this.m_i > this.m_nHistorySize then
+				this.m_i = 0;
+			end
+			this.m_aHistory[this.m_i] = CurrentCell;
+			this.m_aTime[this.m_i] = os.clock();
+		end
+	end
+end
+
+function Shake_Test( this:table, Shake:table )
+	nSize = 0;
+	for i,v in ipairs(Shake) do nSize = nSize +1 end;
+
+	iTest = this.m_i - nSize + 1;
+	if iTest < 0 then
+		iTest = iTest + this.m_nHistorySize;
+	end
+
+	local StartTime:number = os.clock() - this.m_ShakeTime;
+
+	if (this.m_aTime[iTest] == nil) or (this.m_aTime[iTest] < StartTime) then
+		return false;
+	end
+
+	for i,v in ipairs(Shake) do
+		if not (this.m_aHistory[iTest] == v) then
+			return false;
+		end
+		iTest = iTest + 1;
+	end
+	return true;
+end
+
+function Shake_IsShake( this:table )
+	ShakeLeft =  {1,0,1,0};
+	ShakeRight = {0,1,0,1};
+
+	return Shake_Test(this, ShakeLeft) or Shake_Test(this, ShakeRight);
+end
+
+-- ===========================================================================
 --	Debug
 -- ===========================================================================
 
@@ -25,14 +114,13 @@ local m_isDebuging				:boolean = false;	-- Turn on local debug systems
 --	CONSTANTS
 -- ===========================================================================
 
-
 local NORMALIZED_DRAG_THRESHOLD	:number = 0.035;			-- How much movement to kick off a drag
 local NORMALIZED_DRAG_THRESHOLD_SQR :number = NORMALIZED_DRAG_THRESHOLD*NORMALIZED_DRAG_THRESHOLD;
 local MOUSE_SCALAR				:number = 6.0;
 local PAN_SPEED					:number = 1;
 local ZOOM_SPEED				:number = 0.1;
 local DOUBLETAP_THRESHHOLD		:number = 2;
-
+local SHAKE_PIXEL_THRESHOLD     :number = 128; --theshold for shake gesture detection
 
 -- ===========================================================================
 --	Table of tables of functions for each interface mode & event the mode handles
@@ -68,8 +156,11 @@ InterfaceModeMessageHandler =
 	[InterfaceModeTypes.WB_SELECT_PLOT]	    = {},
 	[InterfaceModeTypes.SPY_CHOOSE_MISSION] = {},
 	[InterfaceModeTypes.SPY_TRAVEL_TO_CITY] = {},
-	[InterfaceModeTypes.NATURAL_WONDER]		= {},
-	[InterfaceModeTypes.VIEW_MODAL_LENS]	= {}
+	[InterfaceModeTypes.NATURAL_WONDER]		= {},	-- DEPRECATED: Use CINEMATIC
+	[InterfaceModeTypes.CINEMATIC]			= {},	
+	[InterfaceModeTypes.VIEW_MODAL_LENS]	= {},
+	[InterfaceModeTypes.FULLSCREEN_MAP]	= {},
+	[InterfaceModeTypes.CITY_SELECTION]	= {}
 }
 
 -- ===========================================================================
@@ -116,6 +207,7 @@ local m_dragStartFocusWorldX	:number = 0;
 local m_dragStartFocusWorldY	:number = 0;
 local m_dragStartX				:number	= 0;		-- Mouse or virtual mouse (of average touch points) X
 local m_dragStartY				:number	= 0;		-- Mouse or virtual mouse (of average touch points) Y
+local m_dragSpinAmountX			:number = 0;
 local m_dragX					:number	= 0;	
 local m_dragY					:number	= 0;
 local m_edgePanX				:number = 0;
@@ -135,7 +227,14 @@ local m_kTutorialPermittedHexes			:table = nil;		-- Which hexes are permitted fo
 local m_kTutorialUnitHexRestrictions	:table = nil;		-- Any restrictions on where units can move.  (Key=UnitType, Value={restricted plotIds})
 local m_isPlotFlaggedRestricted			:boolean = false;	-- In a previous operation to determine a move path, was a plot flagged restrticted/bad? (likely due to the tutorial system)
 local m_kTutorialUnitMoveRestrictions	:table = nil;		-- Restrictions for moving (anywhere) of a selected unit type.
-local m_isPauseMenuOpen					:boolean = false;
+local m_isInputBlocked					:boolean = false;
+
+g_MovementPath = UILens.CreateLensLayerHash("Movement_Path");
+g_Numbers = UILens.CreateLensLayerHash("Numbers");
+g_AttackRange = UILens.CreateLensLayerHash("Attack_Range");
+g_HexColoringAttack = UILens.CreateLensLayerHash("Hex_Coloring_Attack");
+g_HexColoringMovement = UILens.CreateLensLayerHash("Hex_Coloring_Movement");
+g_HexColoringPlacement = UILens.CreateLensLayerHash("Hex_Coloring_Placement");
 
 -- ===========================================================================
 --	FUNCTIONS
@@ -173,18 +272,25 @@ end
 --	Pan camera
 -- ===========================================================================
 function ProcessPan( panX :number, panY :number )
+	
+	if UI.GetInterfaceMode() ~= InterfaceModeTypes.CINEMATIC then
 
-	if( panY == 0.0 ) then
-		if( m_isUPpressed ) then panY = panY + PAN_SPEED; end 
-		if( m_isDOWNpressed) then panY = panY - PAN_SPEED; end
+		if m_dragSpinAmountX ~= 0 then 
+			ResetSpin();
+		end
+
+		if( panY == 0.0 ) then
+			if( m_isUPpressed ) then panY = panY + PAN_SPEED; end 
+			if( m_isDOWNpressed) then panY = panY - PAN_SPEED; end
+		end
+
+		if( panX == 0.0 ) then 
+			if( m_isRIGHTpressed ) then panX = panX + PAN_SPEED; end
+			if( m_isLEFTpressed ) then panX = panX - PAN_SPEED; end
+		end
+
+		UI.PanMap( panX, panY );
 	end
-
-	if( panX == 0.0 ) then 
-		if( m_isRIGHTpressed ) then panX = panX + PAN_SPEED; end
-		if( m_isLEFTpressed ) then panX = panX - PAN_SPEED; end
-	end
-
-	UI.PanMap( panX, panY );
 end
 
 
@@ -193,6 +299,9 @@ end
 --	plotId, the plot # to look at
 -- ===========================================================================
 function SnapToPlot( plotId:number )
+	if m_dragSpinAmountX ~= 0 then 
+		ResetSpin();
+	end
 	if (Map.IsPlot(plotId)) then
 		local plot = Map.GetPlotByIndex(plotId);
 		UI.LookAtPlot( plot );
@@ -208,6 +317,9 @@ end
 --	Perform a camera zoom based on the native 2-finger gesture
 -- ===========================================================================
 function RealizeTouchGestureZoom()
+	if m_dragSpinAmountX ~= 0 then 
+		ResetSpin();
+	end
 	if TouchManager:IsInGesture(Gestures.Stretching) then
 		local fDistance:number = TouchManager:GetGestureDistance(Gestures.Stretching);
 		local normalizedX		:number, normalizedY:number = UIManager:GetNormalizedMousePos();
@@ -218,8 +330,9 @@ function RealizeTouchGestureZoom()
 			m_isTouchZooming = true;
 		end
 
-		local fZoomDelta:number = - (fDistance * 0.5);
-		local fZoom:number = m_mapZoomStart + fZoomDelta;		-- Adjust the zoom level.  This speed scalar should be put into the UI configuration.
+		local fSpeed	:number	= 2.4;								-- TODO: This speed scalar should be put into the UI configuration.
+		local fZoomDelta:number = - (fDistance * fSpeed);
+		local fZoom		:number = m_mapZoomStart + fZoomDelta;		-- Adjust the zoom level.
 
 		if( fZoomDelta < 0.0 ) then
 			--UI.SetMapZoom( fZoom, normalizedX, normalizedY );
@@ -229,7 +342,7 @@ function RealizeTouchGestureZoom()
 			UI.SetMapZoom( fZoom, 0.0, 0.0 );
 		end
 
-		--LuaEvents.WorldInput_TouchPlotTooltipHide();	-- Once this gestures starts, stop and plot tooltip
+		LuaEvents.WorldInput_TouchPlotTooltipHide();	-- Once this gestures starts, stop and plot tooltip.
 	else
 		m_isTouchZooming = false;
 	end
@@ -349,6 +462,7 @@ function SelectInPlot( plotX:number, plotY:number )
 				if (pNewSelectedUnit ~= nil and UI.RebuildSelectionList ~= nil) then		-- Checking UI.RebuildSelectionList, so that if an artist fetches the scripts before the next build, they won't be stuck.  Remove that check ASAP.
 					-- The user has manually selected a unit, rebuild the selection list from that unit.
 					UI.RebuildSelectionList(pNewSelectedUnit);
+					UI.SetCycleAdvanceTimer(0);		-- Cancel any auto-advance timer
 				end
 			end
 		end
@@ -360,6 +474,7 @@ function SelectInPlot( plotX:number, plotY:number )
 	if tryCity then
 		if pCity ~= nil then
 			UI.SelectCity(pCity);
+			UI.SetCycleAdvanceTimer(0);		-- Cancel any auto-advance timer
 		end
 		-- No else, as this would be the case when click on a city banner,
 		-- and so the CityBannerManager will handle the selection.
@@ -394,9 +509,11 @@ function ReadyForDragMap()
 	LuaEvents.WorldInput_DragMapBegin();
 end
 function StartDragMap()
-
-	--Don't override m_dragStartX/Y because it is used in rotation, and we ony 
 	local dragStartX:number, dragStartY:number = UIManager:GetNormalizedMousePos();
+
+	local ScreenWidth:number = UIManager:GetScreenSizeVal();
+	Shake_Setup( m_ShakeTracker, dragStartX, 2 * SHAKE_PIXEL_THRESHOLD / ScreenWidth );
+
 	m_dragStartFocusWorldX, m_dragStartFocusWorldY	= UI.GetMapLookAtWorldTarget();
 	m_dragStartWorldX, m_dragStartWorldY			= UI.GetWorldFromNormalizedScreenPos_NoWrap( dragStartX, dragStartY );
 	m_dragX = dragStartX;
@@ -415,6 +532,16 @@ function UpdateDragMap()
 	local dx:number			= m_dragX - x;
 	local dy:number			= m_dragY - y;
 
+	Shake_ProcessMouse( m_ShakeTracker, x );
+
+	--We need to set the screen shake value every frame, even when the screen is not shaking.
+	local ScreenShake:number = 0;
+	if Shake_IsShake( m_ShakeTracker ) then
+		ScreenShake = 1;
+		Shake_Clear( m_ShakeTracker );
+	end
+	WorldView.SetVFXImport("ScreenShake", ScreenShake);
+
 	-- Early out if no change:
 	-- Need m_drag... checks or snap to 0,0 can occur.
 	if (dx==0 and dy==0) or (m_dragStartWorldX==0 and m_dragStartFocusWorldX==0) then
@@ -425,8 +552,12 @@ function UpdateDragMap()
 	end
 
 	if m_isALTDown then
-		UI.SpinMap( m_dragStartX - x, m_dragStartY - y  );
+		m_dragSpinAmountX = m_dragSpinAmountX + dx;
+		UI.SpinMap( m_dragSpinAmountX, 0 );
 	else
+		if m_dragSpinAmountX ~= 0 then 
+			ResetSpin();
+		end
 		UI.DragMap( x, y, m_dragStartWorldX, m_dragStartWorldY, m_dragStartFocusWorldX, m_dragStartFocusWorldY );
 	end
 
@@ -437,9 +568,15 @@ end
 -- ===========================================================================
 --	Reset drag variables for next go around.
 -- ===========================================================================
-function EndDragMap()
+function ResetSpin()
+	m_dragSpinAmountX = 0;
 	UI.SpinMap( 0.0, 0.0 );
+end
 
+function EndDragMap(resetSpin:boolean)
+	if resetSpin then
+		ResetSpin();
+	end
 	LuaEvents.WorldInput_DragMapEnd();
 	m_dragX				= 0;
 	m_dragY				= 0;
@@ -450,7 +587,6 @@ function EndDragMap()
 	m_dragStartWorldX	= 0;
 	m_dragStartWorldY	= 0;	
 end
-
 
 -- ===========================================================================
 --	True if a given unit type is allowed to move to a plot.
@@ -674,6 +810,13 @@ function UnitMovementCancel()
 end
 
 -- ===========================================================================
+function OnUnitCommandStarted(player, unitId, hCommand, iData1)
+    if (hCommand == UnitCommandTypes.CANCEL) then
+		UnitMovementCancel();
+    end
+end
+
+-- ===========================================================================
 --	Unit Range Attack 
 -- ===========================================================================
 function UnitRangeAttack( plotID:number )
@@ -702,9 +845,9 @@ end
 --	Clear the visual representation (and cache) of the movement path
 -- ===========================================================================
 function ClearMovementPath()
-	UILens.ClearLayerHexes( LensLayers.MOVEMENT_PATH );
-	UILens.ClearLayerHexes( LensLayers.NUMBERS );
-	UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+	UILens.ClearLayerHexes( g_MovementPath );
+	UILens.ClearLayerHexes( g_Numbers );
+	UILens.ClearLayerHexes( g_AttackRange );
 	m_cachedPathUnit = nil;
 	m_cachedPathPlotId = -1;
 end
@@ -742,7 +885,7 @@ function RealizeMovementPath(showQueuedPath:boolean)
 	-- Bail if end plot is not determined.
 	local endPlotId	:number = UI.GetCursorPlotID();
 
-	-- Use the queued destinationt o show the queued path
+	-- Use the queued destination to show the queued path
 	if (showQueuedPath) then
 		local queuedEndPlotId:number = UnitManager.GetQueuedDestination( kUnit );
 		if queuedEndPlotId then
@@ -757,11 +900,11 @@ function RealizeMovementPath(showQueuedPath:boolean)
 	
 	-- Only update if a new unit or new plot from the previous update.	
 	if m_cachedPathUnit	~= kUnit or m_cachedPathPlotId	~= endPlotId then
-		UILens.ClearLayerHexes( LensLayers.MOVEMENT_PATH );
-		UILens.ClearLayerHexes( LensLayers.NUMBERS );
-		UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+		UILens.ClearLayerHexes( g_MovementPath );
+		UILens.ClearLayerHexes( g_Numbers );
+		UILens.ClearLayerHexes( g_AttackRange );
 		if m_cachedPathPlotId ~= -1 then
-			UILens.UnFocusHex( LensLayers.ATTACK_RANGE, m_cachedPathPlotId );
+			UILens.UnFocusHex( g_AttackRange, m_cachedPathPlotId );
 		end
 
 		m_cachedPathUnit	= kUnit;
@@ -769,15 +912,13 @@ function RealizeMovementPath(showQueuedPath:boolean)
 
 
 		-- Obtain ordered list of plots.
-		local turnsList		: table;
-		local obstacles		: table;
 		local variations	: table = {};	-- 2 to 3 values
-		local pathPlots		: table = {};
 		local eLocalPlayer	: number = Game.GetLocalPlayer();
 
 		--check for unit position swap first
 		local startPlotId :number = Map.GetPlot(kUnit:GetX(),kUnit:GetY()):GetIndex();
 		if startPlotId ~= endPlotId then
+			local pathPlots		:table = {};
 			local plot			:table				= Map.GetPlotByIndex(endPlotId);
 			local tParameters	:table				= {};
 			tParameters[UnitOperationTypes.PARAM_X] = plot:GetX();
@@ -795,51 +936,56 @@ function RealizeMovementPath(showQueuedPath:boolean)
 				table.insert(variations, {lensNameBase.."_Destination",endPlotId} );
 				table.insert(variations, {lensNameBase.."_Counter", endPlotId} ); -- show counter pip
 				UI.AddNumberToPath( 1, endPlotId);
-				UILens.SetLayerHexesPath(LensLayers.MOVEMENT_PATH, eLocalPlayer, pathPlots, variations);			
+				UILens.SetLayerHexesPath(g_MovementPath, eLocalPlayer, pathPlots, variations);			
 				return;
 			end
 		end
 
-		pathPlots, turnsList, obstacles = UnitManager.GetMoveToPath( kUnit, endPlotId );
+		local pathInfo : table = UnitManager.GetMoveToPathEx( kUnit, endPlotId );
 		
-		if table.count(pathPlots) > 1 then
+		if table.count(pathInfo.plots) > 1 then
 			-- Start and end art "variations" when drawing path
 			local startHexId:number = kUnit:GetPlotId();
-			local endHexId	:number = pathPlots[table.count(pathPlots)];
-			
-			-- Check if our desired "movement" is actually a ranged attack. Early out if so.
-			local isImplicitRangedAttack :boolean = false;
+			local endHexId	:number = pathInfo.plots[table.count(pathInfo.plots)];
 
-			local pResults = UnitManager.GetOperationTargets(kUnit, UnitOperationTypes.RANGE_ATTACK );
-			local pAllPlots = pResults[UnitOperationResults.PLOTS];
-			if pAllPlots ~= nil then
-				for i, modifier in ipairs( pResults[UnitOperationResults.MODIFIERS] ) do
-					if modifier == UnitOperationResults.MODIFIER_IS_TARGET then	
-						if pAllPlots[i] == endPlotId then
-							isImplicitRangedAttack = true;
-							break;
+			-- Don't show the implicit arrow if the unit has no remaining moves
+			-- NOTE: UnitManager.CanStartOperation and kUnit:GetAttacksRemaining both indicate a ranged
+			-- unit with 0 remaining moves can still attack, so we check using kUnit:GetMovesRemaining
+			if kUnit:GetMovesRemaining() > 0 then
+				-- Check if our desired "movement" is actually a ranged attack. Early out if so.
+				local isImplicitRangedAttack :boolean = false;
+
+				local pResults = UnitManager.GetOperationTargets(kUnit, UnitOperationTypes.RANGE_ATTACK );
+				local pAllPlots = pResults[UnitOperationResults.PLOTS];
+				if pAllPlots ~= nil then
+					for i, modifier in ipairs( pResults[UnitOperationResults.MODIFIERS] ) do
+						if modifier == UnitOperationResults.MODIFIER_IS_TARGET then	
+							if pAllPlots[i] == endPlotId then
+								isImplicitRangedAttack = true;
+								break;
+							end
 						end
 					end
 				end
-			end
 
-			if isImplicitRangedAttack then
-				-- Unit can apparently perform a ranged attack on that hex. Show the arrow!
-				local kVariations:table = {};
-				local kEmpty:table = {};
-				table.insert(kVariations, {"EmptyVariant", startHexId, endHexId} );
-				UILens.SetLayerHexesArea(LensLayers.ATTACK_RANGE, eLocalPlayer, kEmpty, kVariations);
+				if isImplicitRangedAttack then
+					-- Unit can apparently perform a ranged attack on that hex. Show the arrow!
+					local kVariations:table = {};
+					local kEmpty:table = {};
+					table.insert(kVariations, {"EmptyVariant", startHexId, endHexId} );
+					UILens.SetLayerHexesArea(g_AttackRange, eLocalPlayer, kEmpty, kVariations);
 
-				-- Focus must be called AFTER the attack range variants are set.
-				UILens.FocusHex( LensLayers.ATTACK_RANGE, endHexId );
-				return; -- We're done here. Do not show a movement path.
+					-- Focus must be called AFTER the attack range variants are set.
+					UILens.FocusHex( g_AttackRange, endHexId );
+					return; -- We're done here. Do not show a movement path.
+				end
 			end
 
 			-- Any plots of path in Fog Of War or midfog?
 			local isPathInFog:boolean = false;
 			local pPlayerVis :table = PlayersVisibility[eLocalPlayer];
 			if pPlayerVis ~= nil then
-				for _,plotIds in pairs(pathPlots) do
+				for _,plotIds in pairs(pathInfo.plots) do
 					isPathInFog = not pPlayerVis:IsVisible(plotIds);
 					if isPathInFog then
 						break;
@@ -848,9 +994,9 @@ function RealizeMovementPath(showQueuedPath:boolean)
 			end
 
 			-- If any plots are in Fog Of War (FOW) then switch to the FOW movement lens.
-			local lensNameBase							:string = "MovementGood";
-			local movePostfix							:string = "";
-			local isPathHaveRestriction,restrictedPlotId = IsPlotPathRestrictedForUnit( pathPlots, turnsList, kUnit );
+			local lensNameBase			:string = "MovementGood";
+			local movePostfix			:string = "";
+			local isPathHaveRestriction,restrictedPlotId = IsPlotPathRestrictedForUnit( pathInfo.plots, pathInfo.turns, kUnit );			
 
 			if showQueuedPath then
 				lensNameBase = "MovementQueue";
@@ -886,35 +1032,35 @@ function RealizeMovementPath(showQueuedPath:boolean)
 			if not showQueuedPath then
 				table.insert(variations, {lensNameBase.."_Origin",startHexId} );
 			end
-			local nTurnCount :number = turnsList[table.count( turnsList )];
+			local nTurnCount :number = pathInfo.turns[table.count( pathInfo.turns )];
 			if not bIsEnemyAtEnd or nTurnCount > 1 then
 				table.insert(variations, {lensNameBase.."_Destination",endHexId} );
 			end
 
-			-- Since turnsList are matched against plots, this should be the same # as above.
-			if table.count(turnsList) > 1 then
+			-- Since pathInfo.turns are matched against plots, this should be the same # as above.
+			if table.count(pathInfo.turns) > 1 then
 
 				-- Track any "holes" in the path.
 				local pathHole:table = {};
-				for i=1,table.count(pathPlots),1 do
+				for i=1,table.count(pathInfo.plots),1 do
 					pathHole[i] = true;
 				end
 
 				local lastTurn:number = 1;
-				for i,value in pairs(turnsList) do
+				for i,value in pairs(pathInfo.turns) do
 
 					-- If a new turn entry exists, or it's the very last entry of the path... show turn INFO.
 					if value > lastTurn then
 						if i > 1 then
-							table.insert(variations, {lensNameBase.."_Counter", pathPlots[i-1]} );								-- show counter pip
-							UI.AddNumberToPath( lastTurn, pathPlots[i-1] );
+							table.insert(variations, {lensNameBase.."_Counter", pathInfo.plots[i-1]} );								-- show counter pip
+							UI.AddNumberToPath( lastTurn, pathInfo.plots[i-1] );
 							pathHole[i-1]=false;
 						end
 						lastTurn = value;
 					end
-					if i == table.count(turnsList) and i > 1 then
-						table.insert(variations, {lensNameBase.."_Counter", pathPlots[i]} );								-- show counter pip
-						UI.AddNumberToPath( lastTurn, pathPlots[i] );
+					if i == table.count(pathInfo.turns) and i > 1 then
+						table.insert(variations, {lensNameBase.."_Counter", pathInfo.plots[i]} );								-- show counter pip
+						UI.AddNumberToPath( lastTurn, pathInfo.plots[i] );
 						if lastTurn == 2 then
 							if m_previousTurnsCount == 1 then
 								UI.PlaySound("UI_Multi_Turn_Movement_Alert");
@@ -928,16 +1074,16 @@ function RealizeMovementPath(showQueuedPath:boolean)
 				-- Any obstacles? (e.g., rivers)
 				if not showQueuedPath then
 					local plotIndex:number = 1;
-					for i,value in pairs(obstacles) do
-						while( pathPlots[plotIndex] ~= value ) do plotIndex = plotIndex + 1; end	-- Get ID to use for river's next plot
-						table.insert(variations, {lensNameBase.."_Minus", value, pathPlots[plotIndex+1]} );
+					for i,value in pairs(pathInfo.obstacles) do
+						while( pathInfo.plots[plotIndex] ~= value ) do plotIndex = plotIndex + 1; end	-- Get ID to use for river's next plot
+						table.insert(variations, {lensNameBase.."_Minus", value, pathInfo.plots[plotIndex+1]} );
 					end
 				end
 
 				-- Any variations not filled in earlier (holes), are filled in with Pips
 				for i,isHole in pairs(pathHole) do
 					if isHole then
-						table.insert(variations, {lensNameBase.."_Pip", pathPlots[i]} );		-- non-counter pip
+						table.insert(variations, {lensNameBase.."_Pip", pathInfo.plots[i]} );		-- non-counter pip
 					end
 				end
 			end
@@ -950,15 +1096,41 @@ function RealizeMovementPath(showQueuedPath:boolean)
 					UILens.SetActive("MovementBad");	
 					lensNameBase = "MovementBad";
 				end
-				table.insert(pathPlots, endPlotId);
+				table.insert(pathInfo.plots, endPlotId);
 				table.insert(variations, {"MovementBad_Destination", endPlotId} );
 			else
-				table.insert(pathPlots, endPlotId);
+				table.insert(pathInfo.plots, endPlotId);
 				table.insert(variations, {"MovementGood_Destination", endPlotId} );
 			end
 		end
 
-		UILens.SetLayerHexesPath(LensLayers.MOVEMENT_PATH, eLocalPlayer, pathPlots, variations);			
+		-- Handle mountain tunnels
+		-- TODO consider adding variations for entering/exiting portals
+		local pPathSegment = { };
+		for i,plot in pairs(pathInfo.plots) do
+		
+			-- Prepend an exit portal if one exists
+			local pExit = pathInfo.exitPortals[i];
+			if (pExit and pExit >= 0) then
+				table.insert(pPathSegment, pExit);
+			end
+
+			-- Add the next plot to the segment
+			table.insert(pPathSegment, plot);
+			
+			-- Append an entrance portal if one exists
+			local pEntrance = pathInfo.entrancePortals[i];
+			if (pEntrance and pEntrance >= 0) then
+				table.insert(pPathSegment, pEntrance);
+			
+				-- Submit the segment so far and start a new segment
+				UILens.SetLayerHexesPath(g_MovementPath, eLocalPlayer, pPathSegment, { });
+				pPathSegment = { };
+			end
+		end
+
+		-- Submit the final segment
+		UILens.SetLayerHexesPath(g_MovementPath, eLocalPlayer, pPathSegment, variations);			
 	end
 end
 
@@ -966,7 +1138,7 @@ end
 --	Game Engine Event
 -- ===========================================================================
 function OnUnitSelectionChanged( playerID:number, unitID:number, hexI:number, hexJ:number, hexK:number, isSelected:boolean, isEditable:boolean )
-	if playerID ~= Game.GetLocalPlayer() then
+	if playerID ~= Game.GetLocalPlayer() then 
 		return;
 	end
 
@@ -989,7 +1161,7 @@ function DefaultKeyDownHandler( uiKey:number )
 	if uiKey == Keys.VK_ALT then
 		if m_isALTDown == false then
 			m_isALTDown = true;
-			EndDragMap();
+			EndDragMap(true);
 			ReadyForDragMap();
 		end
 	end
@@ -1023,7 +1195,7 @@ function DefaultKeyUpHandler( uiKey:number )
 	if uiKey == Keys.VK_ALT then
 		if m_isALTDown == true then
 			m_isALTDown = false;
-			EndDragMap();
+			EndDragMap(true);
 			ReadyForDragMap();
 		end
 	end
@@ -1068,17 +1240,25 @@ end
 --
 -- .,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,.,;/^`'^\:,
 
+-- ===========================================================================
+function OnBlockInput()
+	m_isInputBlocked = true;
+end
+
+-- ===========================================================================
+function OnUnblockInput()
+	m_isInputBlocked = false;
+	ClearAllCachedInputState();
+end
 
 -- ===========================================================================
 function OnDefaultKeyDown( pInputStruct:table )
-	if m_isPauseMenuOpen then return; end
 	local uiKey			:number = pInputStruct:GetKey();
 	return DefaultKeyDownHandler( uiKey );	
 end
 
 -- ===========================================================================
 function OnDefaultKeyUp( pInputStruct:table )
-	if m_isPauseMenuOpen then return; end
 	local uiKey			:number = pInputStruct:GetKey();
 	return DefaultKeyUpHandler( uiKey );	
 end
@@ -1087,7 +1267,6 @@ end
 --	Placing a building, wonder, or district; ESC to leave 
 -- ===========================================================================
 function OnPlacementKeyUp( pInputStruct:table )
-	if m_isPauseMenuOpen then return; end
 	local uiKey			:number = pInputStruct:GetKey();
 	if uiKey == Keys.VK_ESCAPE then
 		UI.SetInterfaceMode(InterfaceModeTypes.SELECTION);
@@ -1127,7 +1306,7 @@ function OnMouseDebugEnd( pInputStruct:table )
 			DebugPlacement( plotID, edge );
 		end
 	end
-	EndDragMap();					-- Reset any dragging
+	EndDragMap(true);					-- Reset any dragging
 	g_isMouseDownInWorld = false;
 	return true;
 
@@ -1180,7 +1359,7 @@ function OnMouseSelectionEnd( pInputStruct:table )
 			SelectInPlot( plotX, plotY );
 		end
 	end
-	EndDragMap();					-- Reset any dragging
+	EndDragMap(false);					-- Reset any dragging
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -1294,7 +1473,7 @@ function OnMouseEnd( pInputStruct:table )
 	if g_isMouseDragging then
 		g_isMouseDragging = false;
 	end
-	EndDragMap();					-- Reset any dragging
+	EndDragMap(true);					-- Reset any dragging
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -1347,10 +1526,11 @@ function OnMouseMakeTradeRouteEnd( pInputStruct:table )
 	else
 		local plotId:number = UI.GetCursorPlotID();
 		if (Map.IsPlot(plotId)) then
+			UI.PlaySound("Play_UI_Click");
 			LuaEvents.WorldInput_MakeTradeRouteDestination( plotId );
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = true;
 	return true;
 end
@@ -1369,7 +1549,7 @@ function OnMouseTeleportToCityEnd( pInputStruct:table )
 	else
 		TeleportToCity();
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = true;
 	return true;
 end
@@ -1390,7 +1570,7 @@ function OnMouseBuildingPlacementEnd( pInputStruct:table )
 			ConfirmPlaceWonder(pInputStruct);	-- StrategicView_MapPlacement.lua
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -1418,7 +1598,7 @@ function OnMouseDistrictPlacementEnd( pInputStruct:table )
 			ConfirmPlaceDistrict(pInputStruct);
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -1458,7 +1638,7 @@ function OnMouseMoveRangeAttack( pInputStruct:table )
 	if (Map.IsPlot(plotID)) then
 		if m_focusedTargetPlot ~= plotID then
 			if m_focusedTargetPlot ~= -1 then
-				UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+				UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 				m_focusedTargetPlot = -1;
 			end
 
@@ -1473,7 +1653,7 @@ function OnMouseMoveRangeAttack( pInputStruct:table )
 
 				if bPlotIsTarget then
 					m_focusedTargetPlot = plotID;
-					UILens.FocusHex(LensLayers.ATTACK_RANGE, plotID);
+					UILens.FocusHex(g_AttackRange, plotID);
 				end
 			end
 		end
@@ -1502,7 +1682,7 @@ function OnMouseMoveToEnd( pInputStruct:table )
 		end
 		UI.SetInterfaceMode( InterfaceModeTypes.SELECTION );
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -1567,7 +1747,7 @@ function OnTouchDebugEnd( pInputStruct:table )
 		end
 	end
 
-	EndDragMap(); -- Reset any dragging
+	EndDragMap(true); -- Reset any dragging
 	m_touchTotalNum	= 0;
 	m_isTouchZooming	= false;
 	m_touchStartPlotX	= -1;
@@ -1673,7 +1853,7 @@ function OnTouchSelectionEnd( pInputStruct:table )
 		end
 	end
 
-	EndDragMap();
+	EndDragMap(false);
 	m_touchTotalNum		= 0;
 	m_isTouchZooming	= false;	
 	m_touchStartPlotX	= -1;
@@ -1744,7 +1924,7 @@ function OnTouchTradeRouteEnd( pInputStruct:table )
 		end
 	end
 
-	EndDragMap();
+	EndDragMap(true);
 	m_touchTotalNum		= 0;
 	m_isTouchZooming	= false;	
 	m_touchStartPlotX	= -1;
@@ -1767,7 +1947,7 @@ function OnTouchTeleportToCityEnd( pInputStruct:table )
 		TeleportToCity();
 	end
 
-	EndDragMap();
+	EndDragMap(true);
 	m_touchTotalNum		= 0;
 	m_isTouchZooming	= false;	
 	m_touchStartPlotX	= -1;
@@ -1848,7 +2028,7 @@ function OnInterfaceModeChange_UnitRangeAttack(eNewMode)
 	if (pSelectedUnit ~= nil) then
 
 		if m_focusedTargetPlot ~= -1 then
-			UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+			UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 			m_focusedTargetPlot = -1;
 		end
 
@@ -1873,7 +2053,7 @@ function OnInterfaceModeChange_UnitRangeAttack(eNewMode)
 				end
 				local eLocalPlayer:number = Game.GetLocalPlayer();
 
-				UILens.SetLayerHexesArea(LensLayers.ATTACK_RANGE, eLocalPlayer, allPlots, kVariations);
+				UILens.SetLayerHexesArea(g_AttackRange, eLocalPlayer, allPlots, kVariations);
 			end
 		end
 	end
@@ -1881,7 +2061,7 @@ end
 
 -------------------------------------------------------------------------------
 function OnInterfaceModeLeave_UnitRangeAttack(eNewMode)
-	UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+	UILens.ClearLayerHexes( g_AttackRange );
 end
 
 -- ===========================================================================
@@ -1941,8 +2121,8 @@ function OnInterfaceModeChange_Air_Attack(eNewMode)
 			-- Highlight the plots available to attack
 			if (table.count(g_targetPlots) ~= 0) then
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_ATTACK);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_ATTACK, eLocalPlayer, g_targetPlots);
+				UILens.ToggleLayerOn(g_HexColoringAttack);
+				UILens.SetLayerHexesArea(g_HexColoringAttack, eLocalPlayer, g_targetPlots);
 			end
 		end
 	end
@@ -1951,8 +2131,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_Air_Attack( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_ATTACK );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_ATTACK );
+	UILens.ToggleLayerOff( g_HexColoringAttack );
+	UILens.ClearLayerHexes( g_HexColoringAttack );
 end
 
 -- ===========================================================================
@@ -2015,7 +2195,7 @@ function OnInterfaceModeChange_WMD_Strike(eNewMode)
 	local pSelectedUnit = UI.GetHeadSelectedUnit();
 	if (pSelectedUnit ~= nil) then
 		if m_focusedTargetPlot ~= -1 then
-			UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+			UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 			m_focusedTargetPlot = -1;
 		end
 		local sourcePlot : number =  Map.GetPlot(pSelectedUnit:GetX(),pSelectedUnit:GetY()):GetIndex();
@@ -2039,8 +2219,8 @@ function OnInterfaceModeChange_WMD_Strike(eNewMode)
 					table.insert(kVariations, {"AttackRange_Target", sourcePlot, plotId} );	
 				end
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_ATTACK);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_ATTACK, eLocalPlayer, g_targetPlots, kVariations);
+				UILens.ToggleLayerOn(g_HexColoringAttack);
+				UILens.SetLayerHexesArea(g_HexColoringAttack, eLocalPlayer, g_targetPlots, kVariations);
 			end
 		end
 	end
@@ -2049,8 +2229,8 @@ end
 -------------------------------------------------------------------------------
 function OnInterfaceModeLeave_WMD_Strike( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_ATTACK );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_ATTACK );
+	UILens.ToggleLayerOff( g_HexColoringAttack );
+	UILens.ClearLayerHexes( g_HexColoringAttack );
 end
 
 -- ===========================================================================
@@ -2120,7 +2300,7 @@ function OnInterfaceModeChange_ICBM_Strike(eNewMode)
 
 	if (pCity ~= nil) then
 		if m_focusedTargetPlot ~= -1 then
-			UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+			UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 			m_focusedTargetPlot = -1;
 		end
 		local eWMD = UI.GetInterfaceModeParameter(CityCommandTypes.PARAM_WMD_TYPE);
@@ -2149,8 +2329,8 @@ function OnInterfaceModeChange_ICBM_Strike(eNewMode)
 					table.insert(kVariations, {"AttackRange_Target", sourcePlot , plotId} );	
 				end
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_ATTACK);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_ATTACK, eLocalPlayer, g_targetPlots, kVariations);
+				UILens.ToggleLayerOn(g_HexColoringAttack);
+				UILens.SetLayerHexesArea(g_HexColoringAttack, eLocalPlayer, g_targetPlots, kVariations);
 			end
 		else
 			UI.SetInterfaceMode(InterfaceModeTypes.SELECTION);
@@ -2161,8 +2341,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_ICBM_Strike( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_ATTACK );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_ATTACK );
+	UILens.ToggleLayerOff( g_HexColoringAttack );
+	UILens.ClearLayerHexes( g_HexColoringAttack );
 end
 
 -- ===========================================================================
@@ -2213,8 +2393,8 @@ function OnInterfaceModeChange_CoastalRaid(eNewMode)
 			-- Highlight the plots available to attack
 			if (table.count(g_targetPlots) ~= 0) then
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_ATTACK);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_ATTACK, eLocalPlayer, g_targetPlots);
+				UILens.ToggleLayerOn(g_HexColoringAttack);
+				UILens.SetLayerHexesArea(g_HexColoringAttack, eLocalPlayer, g_targetPlots);
 			end
 		end
 	end
@@ -2223,8 +2403,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_CoastalRaid( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_ATTACK );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_ATTACK );
+	UILens.ToggleLayerOff( g_HexColoringAttack );
+	UILens.ClearLayerHexes( g_HexColoringAttack );
 end
 
 -- ===========================================================================
@@ -2239,7 +2419,7 @@ function OnMouseDeployEnd( pInputStruct )
 			AirUnitDeploy(pInputStruct);
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -2281,8 +2461,8 @@ function OnInterfaceModeChange_Deploy(eNewMode)
 			-- Highlight the plots available to deploy to
 			if (table.count(g_targetPlots) ~= 0) then
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_MOVEMENT);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_MOVEMENT, eLocalPlayer, g_targetPlots);
+				UILens.ToggleLayerOn(g_HexColoringMovement);
+				UILens.SetLayerHexesArea(g_HexColoringMovement, eLocalPlayer, g_targetPlots);
 			end
 		end
 	end
@@ -2291,8 +2471,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_Deploy( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_MOVEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_MOVEMENT );
+	UILens.ToggleLayerOff( g_HexColoringMovement );
+	UILens.ClearLayerHexes( g_HexColoringMovement );
 end
 
 -- ===========================================================================
@@ -2307,7 +2487,7 @@ function OnMouseRebaseEnd( pInputStruct )
 			AirUnitReBase(pInputStruct);
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -2347,8 +2527,8 @@ function OnInterfaceModeChange_ReBase(eNewMode)
 			-- Highlight the plots available to deploy to
 			if (table.count(g_targetPlots) ~= 0) then
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_MOVEMENT);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_MOVEMENT, eLocalPlayer, g_targetPlots);
+				UILens.ToggleLayerOn(g_HexColoringMovement);
+				UILens.SetLayerHexesArea(g_HexColoringMovement, eLocalPlayer, g_targetPlots);
 			end
 		end
 	end
@@ -2357,8 +2537,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_ReBase( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_MOVEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_MOVEMENT );
+	UILens.ToggleLayerOff( g_HexColoringMovement );
+	UILens.ClearLayerHexes( g_HexColoringMovement );
 end
 
 -- ===========================================================================
@@ -2407,7 +2587,7 @@ function OnInterfaceModeChange_CityRangeAttack(eNewMode)
 	if (pSelectedCity ~= nil) then
 		
 		if m_focusedTargetPlot ~= -1 then
-			UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+			UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 			m_focusedTargetPlot = -1;
 		end
 
@@ -2435,7 +2615,7 @@ function OnInterfaceModeChange_CityRangeAttack(eNewMode)
 				end
 				local eLocalPlayer:number = Game.GetLocalPlayer();
 				
-				UILens.SetLayerHexesArea(LensLayers.ATTACK_RANGE, eLocalPlayer, allPlots, kVariations);
+				UILens.SetLayerHexesArea(g_AttackRange, eLocalPlayer, allPlots, kVariations);
 							
 			end
 		end
@@ -2444,7 +2624,7 @@ end
 
 -------------------------------------------------------------------------------
 function OnInterfaceModeLeave_CityRangeAttack(eNewMode)
-	UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+	UILens.ClearLayerHexes( g_AttackRange );
 end
 
 -------------------------------------------------------------------------------
@@ -2477,7 +2657,7 @@ function OnInterfaceModeChange_DistrictRangeAttack(eNewMode)
 	if (pSelectedDistrict ~= nil) then
 		
 		if m_focusedTargetPlot ~= -1 then
-			UILens.UnFocusHex(LensLayers.ATTACK_RANGE, m_focusedTargetPlot);
+			UILens.UnFocusHex(g_AttackRange, m_focusedTargetPlot);
 			m_focusedTargetPlot = -1;
 		end
 
@@ -2506,7 +2686,7 @@ function OnInterfaceModeChange_DistrictRangeAttack(eNewMode)
 				end
 				local eLocalPlayer:number = Game.GetLocalPlayer();
 				
-				UILens.SetLayerHexesArea(LensLayers.ATTACK_RANGE, eLocalPlayer, allPlots, kVariations);
+				UILens.SetLayerHexesArea(g_AttackRange, eLocalPlayer, allPlots, kVariations);
 								
 			end
 		end
@@ -2515,12 +2695,12 @@ end
 
 -------------------------------------------------------------------------------
 function OnInterfaceModeLeave_DistrictRangeAttack(eNewMode)
-	UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+	UILens.ClearLayerHexes( g_AttackRange );
 end
 
 -------------------------------------------------------------------------------
 function OnInterfaceModeLeave_WMDRangeAttack(eNewMode)
-	UILens.ClearLayerHexes( LensLayers.ATTACK_RANGE );
+	UILens.ClearLayerHexes( g_AttackRange );
 end
 
 ------------------------------------------------------------------------------------------------
@@ -2572,8 +2752,8 @@ function OnInterfaceModeChange_TeleportToCity(eNewMode)
 			-- Highlight the plots available to deploy to
 			if (table.count(g_targetPlots) ~= 0) then
 				local eLocalPlayer:number = Game.GetLocalPlayer();
-				UILens.ToggleLayerOn(LensLayers.HEX_COLORING_MOVEMENT);
-				UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_MOVEMENT, eLocalPlayer, g_targetPlots);
+				UILens.ToggleLayerOn(g_HexColoringMovement);
+				UILens.SetLayerHexesArea(g_HexColoringMovement, eLocalPlayer, g_targetPlots);
 			end
 		end
 	end
@@ -2582,8 +2762,8 @@ end
 ---------------------------------------------------------------------------------
 function OnInterfaceModeLeave_TeleportToCity( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_MOVEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_MOVEMENT );
+	UILens.ToggleLayerOff( g_HexColoringMovement );
+	UILens.ClearLayerHexes( g_HexColoringMovement );
 end
 
 -- =============================================================================================
@@ -2626,13 +2806,24 @@ function OnInterfaceModeChange_SpyTravelToCity()
 
 end
 
-function OnInterfaceModeChange_NaturalWonder()
+-- =============================================================================================
+function OnInterfaceModeChange_FullscreenMap()
+	UIManager:SetUICursor(CursorTypes.NORMAL);
+end
+
+-- =============================================================================================
+function OnInterfaceModeChange_CitySelection()
+	UIManager:SetUICursor(CursorTypes.NORMAL);
+end
+
+-- ===========================================================================
+function OnInterfaceModeChange_Cinematic()
 	UIManager:SetUICursor(CursorTypes.NORMAL);
 	UI.SetFixedTiltMode( true );
 end
 
 -- ===========================================================================
-function OnInterfaceModeLeave_NaturalWonder( eNewMode:number )
+function OnInterfaceModeLeave_Cinematic( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
 	UI.SetFixedTiltMode( false );
 	OnCycleUnitSelectionRequest();
@@ -2646,12 +2837,12 @@ function OnMouseEnd_WBSelectPlot( pInputStruct:table )
 		print("Stopping drag");
 		g_isMouseDragging = false;
 	else
-		print("World Builder Placement");
 		if (Map.IsPlot(UI.GetCursorPlotID())) then
-			LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), true);
+			LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), true, false);
+			LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), false, false);
 		end
 	end
-	EndDragMap(); -- Reset any dragging
+	EndDragMap(true); -- Reset any dragging
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -2659,7 +2850,15 @@ end
 -- ===========================================================================
 function OnRButtonUp_WBSelectPlot( pInputStruct )
 	if (Map.IsPlot(UI.GetCursorPlotID())) then
-		LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), false);
+		LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), false, true);
+	end
+	return true;
+end
+
+-- ===========================================================================
+function OnRButtonDown_WBSelectPlot( pInputStruct )
+	if (Map.IsPlot(UI.GetCursorPlotID())) then
+		LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), true, true);
 	end
 	return true;
 end
@@ -2674,6 +2873,10 @@ function OnMouseMove_WBSelectPlot( pInputStruct )
 			if mouseOverPlot ~= m_WBMouseOverPlot then
 				m_WBMouseOverPlot = mouseOverPlot;
 				LuaEvents.WorldInput_WBMouseOverPlot(mouseOverPlot);
+
+				if m_isMouseButtonRDown then
+					LuaEvents.WorldInput_WBSelectPlot(UI.GetCursorPlotID(), UI.GetCursorNearestPlotEdge(), true, true);
+				end
 			end
 		end
 	end
@@ -2718,8 +2921,8 @@ function OnInterfaceModeChange_UnitFormCorps(eNewMode)
 			local unit = Players[player]:GetUnits():FindID(unitComponentID.id);
 			table.insert(unitPlots, Map.GetPlotIndex(unit:GetX(), unit:GetY()));
 		end
-		UILens.ToggleLayerOn(LensLayers.HEX_COLORING_PLACEMENT);
-		UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_PLACEMENT, player, unitPlots);
+		UILens.ToggleLayerOn(g_HexColoringPlacement);
+		UILens.SetLayerHexesArea(g_HexColoringPlacement, player, unitPlots);
 		g_targetPlots = unitPlots;
 	end
 end
@@ -2727,8 +2930,8 @@ end
 --------------------------------------------------------------------------------------------------
 function OnInterfaceModeLeave_UnitFormCorps( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_PLACEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_PLACEMENT );
+	UILens.ToggleLayerOff( g_HexColoringPlacement );
+	UILens.ClearLayerHexes( g_HexColoringPlacement );
 end
 
 ------------------------------------------------------------------------------------------------
@@ -2769,8 +2972,8 @@ function OnInterfaceModeChange_UnitFormArmy(eNewMode)
 			local unit = Players[player]:GetUnits():FindID(unitComponentID.id);
 			table.insert(unitPlots, Map.GetPlotIndex(unit:GetX(), unit:GetY()));
 		end
-		UILens.ToggleLayerOn(LensLayers.HEX_COLORING_PLACEMENT);
-		UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_PLACEMENT, player, unitPlots);
+		UILens.ToggleLayerOn(g_HexColoringPlacement);
+		UILens.SetLayerHexesArea(g_HexColoringPlacement, player, unitPlots);
 		g_targetPlots = unitPlots;
 	end
 end
@@ -2778,8 +2981,8 @@ end
 --------------------------------------------------------------------------------------------------
 function OnInterfaceModeLeave_UnitFormArmy( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_PLACEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_PLACEMENT );
+	UILens.ToggleLayerOff( g_HexColoringPlacement );
+	UILens.ClearLayerHexes( g_HexColoringPlacement );
 end
 
 ------------------------------------------------------------------------------------------------
@@ -2795,7 +2998,7 @@ function OnMouseAirliftEnd( pInputStruct )
 			UnitAirlift(pInputStruct);
 		end
 	end
-	EndDragMap();
+	EndDragMap(true);
 	g_isMouseDownInWorld = false;
 	return true;
 end
@@ -2833,16 +3036,16 @@ function OnInterfaceModeChange_UnitAirlift(eNewMode)
 		-- Highlight the plots available to airlift to
 		if (table.count(g_targetPlots) ~= 0) then
 			local eLocalPlayer:number = Game.GetLocalPlayer();
-			UILens.ToggleLayerOn(LensLayers.HEX_COLORING_MOVEMENT);
-			UILens.SetLayerHexesArea(LensLayers.HEX_COLORING_MOVEMENT, eLocalPlayer, g_targetPlots);
+			UILens.ToggleLayerOn(g_HexColoringMovement);
+			UILens.SetLayerHexesArea(g_HexColoringMovement, eLocalPlayer, g_targetPlots);
 		end
 	end
 end
 --------------------------------------------------------------------------------------------------
 function OnInterfaceModeLeave_UnitAirlift( eNewMode:number )
 	UIManager:SetUICursor(CursorTypes.NORMAL);
-	UILens.ToggleLayerOff( LensLayers.HEX_COLORING_MOVEMENT );
-	UILens.ClearLayerHexes( LensLayers.HEX_COLORING_MOVEMENT );
+	UILens.ToggleLayerOff( g_HexColoringMovement );
+	UILens.ClearLayerHexes( g_HexColoringMovement );
 end
 
 
@@ -2875,9 +3078,9 @@ function OnCycleUnitSelectionRequest()
 	--	return;
 	--end
 	
-	if(UI.GetInterfaceMode() ~= InterfaceModeTypes.NATURAL_WONDER or m_isMouseButtonRDown) then
+	if(UI.GetInterfaceMode() ~= InterfaceModeTypes.CINEMATIC or m_isMouseButtonRDown) then
 		-- Auto-advance selection to the next unit.
-		if not UI.SelectNextReadyUnit() then
+		if not UI.SelectClosestReadyUnit() then
 			UI.DeselectAllUnits();
 		end	
 	end
@@ -2890,6 +3093,8 @@ end
 --	eNewMode, new mode the engine has just changed to
 -- ===========================================================================
 function OnInterfaceModeChanged( eOldMode:number, eNewMode:number )
+
+	ResetSpin();
 
 	-- Optional: function run before a mode is exited.
 	local pOldModeHandler :table = InterfaceModeMessageHandler[eOldMode];
@@ -2916,24 +3121,22 @@ function OnInterfaceModeChanged( eOldMode:number, eNewMode:number )
 end
 
 -- ===========================================================================
---	ENGINE Event
+--	TODO: Move out of WorldInput
 -- ===========================================================================
-function IsEndGameMenuShown()
-	local endGameShown = false;
-	local endGameContext = ContextPtr:LookUpControl("/InGame/EndGameMenu");
-	if(endGameContext) then
-		endGameShown = not endGameContext:IsHidden();
-	end
-	return endGameShown;
+function IsEndGame()	
+	return Game.GetWinningTeam() ~= nil;	-- Not great, direct game core call. :/
 end
 
+-- ===========================================================================
+--	TODO: Move out of WorldInput
+-- ===========================================================================
 function OnMultiplayerGameLastPlayer()
 	-- Only show the last player popup in multiplayer games where the session is a going concern
 	if(GameConfiguration.IsNetworkMultiplayer() 
 	and not Network.IsSessionInCloseState()
 	-- suppress popup when the end game screen is up. 
 	-- This specifically prevents a turn spinning issue that can occur if the host migrates to a dead human player on the defeated screen. TTP 18902
-	and not IsEndGameMenuShown()) then  
+	and not IsEndGame()) then  
 		local lastPlayerStr = Locale.Lookup( "TXT_KEY_MP_LAST_PLAYER" );
 		local lastPlayerTitleStr = Locale.Lookup( "TXT_KEY_MP_LAST_PLAYER_TITLE" );
 		local okStr = Locale.Lookup( "LOC_OK_BUTTON" );
@@ -2949,31 +3152,59 @@ end
 --	ENGINE Event
 -- ===========================================================================
 function OnMultiplayerGameAbandoned(eReason)
-	if(GameConfiguration.IsNetworkMultiplayer()) then
+	if(GameConfiguration.IsAnyMultiplayer()) then
 		local errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_CONNECTION_LOST" );
+		local errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_CONNECTION_LOST_TITLE" );
 		local exitStr = Locale.Lookup( "LOC_GAME_MENU_EXIT_TO_MAIN" );
 
 		-- Select error message based on KickReason.  
 		-- Not all of these should be possible while in game but we include them anyway.
 		if (eReason == KickReason.KICK_HOST) then
 			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_KICKED" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_KICKED_TITLE" );
 		elseif (eReason == KickReason.KICK_NO_HOST) then
 			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_HOST_LOSTED" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_HOST_LOSTED_TITLE" );
 		elseif (eReason == KickReason.KICK_NO_ROOM) then
 			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_ROOM_FULL" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_ROOM_FULL_TITLE" );
 		elseif (eReason == KickReason.KICK_VERSION_MISMATCH) then
 			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_VERSION_MISMATCH" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_VERSION_MISMATCH_TITLE" );
 		elseif (eReason == KickReason.KICK_MOD_ERROR) then
 			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_MOD_ERROR" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_MOD_ERROR_TITLE" );
+		elseif (eReason == KickReason.KICK_MATCH_DELETED) then
+			errorStr = Locale.Lookup( "LOC_GAME_ABANDONED_MATCH_DELETED" );
+			errorTitle = Locale.Lookup( "LOC_GAME_ABANDONED_MATCH_DELETED_TITLE" );
 		end
 
 		local pPopupDialog :table = PopupDialogInGame:new("PlayerKicked");
+		pPopupDialog:AddTitle(errorTitle);
 		pPopupDialog:AddText(errorStr);
 		pPopupDialog:AddDefaultButton(exitStr,  
 			function()
 				Events.ExitToMainMenu();
 			end);
 		pPopupDialog:Open();
+	end
+end
+
+function OnMatchEndTurnComplete( success:boolean, resultCode:number )
+	if( success == false ) then
+		-- Something went wrong while trying to commit a PlayByCloud turn.  Display a generic popup and get us out of here.
+		local errorStr = Locale.Lookup( "LOC_GAME_CLOUD_END_TURN_FAILED", resultCode);
+		local errorTitle = Locale.Lookup( "LOC_GAME_CLOUD_END_TURN_FAILED_TITLE" );
+		local exitStr = Locale.Lookup( "LOC_GAME_MENU_EXIT_TO_MAIN" );
+
+		local pPopupDialog :table = PopupDialogInGame:new("TurnCommitFailed");
+		pPopupDialog:AddTitle(errorTitle);
+		pPopupDialog:AddText(errorStr);
+		pPopupDialog:AddDefaultButton(exitStr,  
+			function()
+				Events.ExitToMainMenu();
+			end);
+		pPopupDialog:Open();		
 	end
 end
 
@@ -3048,10 +3279,15 @@ function OnInputHandler( pInputStruct:table )
 
 	local uiMsg :number = pInputStruct:GetMessageType();
 	local mode  :number = UI.GetInterfaceMode();
+	
+	if m_isInputBlocked == true then
+		return;
+	end
 
 	if uiMsg == MouseEvents.PointerLeave then
 		ClearAllCachedInputState();
 		ProcessPan(0,0);
+		ResetSpin();
 		return;
 	end
 
@@ -3148,7 +3384,6 @@ function OnInputHandler( pInputStruct:table )
 		g_isMouseDragging = false;	-- No mouse down, no dragging is occuring!
 	end
 
-
 	return isHandled;
 end
 
@@ -3195,12 +3430,21 @@ function ClearAllCachedInputState()
 	m_dragStartY		= 0;
 	m_dragX				= 0;
 	m_dragY				= 0;
+	m_dragSpinAmountX   = 0;
 	m_edgePanX			= 0.0;
 	m_edgePanY			= 0.0;
 	m_touchTotalNum		= 0;
 	m_touchStartPlotX	= -1;
 	m_touchStartPlotY	= -1;
 	ms_bGridOn			= true;
+end
+
+
+-- ===========================================================================
+function OnUpdateUI( type:number, tag:string, iData1:number, iData2:number, strData1:string )
+	if type == SystemUpdateUI.TouchInputChanged then
+		g_isTouchEnabled = Options.GetAppOption("UI", "IsTouchScreenEnabled") ~= 0;
+	end
 end
 
 
@@ -3221,108 +3465,13 @@ end
 function OnAppLostFocusHandler()
 	ClearAllCachedInputState();
 	ProcessPan(0,0);
+	ResetSpin();
 end
-
 
 -- ===========================================================================
 --	UI Event
 -- ===========================================================================
-function OnShutdown()
-	-- Clean up events
-	Events.CycleUnitSelectionRequest.Remove( OnCycleUnitSelectionRequest );
-	Events.InterfaceModeChanged.Remove( OnInterfaceModeChanged );
-	
-	LuaEvents.Tutorial_ConstrainMovement.Remove( OnTutorial_ConstrainMovement );
-	LuaEvents.Tutorial_DisableMapDrag.Remove( OnTutorial_DisableMapDrag );
-	LuaEvents.Tutorial_DisableMapSelect.Remove( OnTutorial_DisableMapSelect );
-end
-
--- ===========================================================================
---	Hotkey Event
--- ===========================================================================
-function OnInputActionTriggered( actionId )
-	if actionId == m_actionHotkeyToggleGrid then
-		LuaEvents.MinimapPanel_ToggleGrid();
-		LuaEvents.MinimapPanel_RefreshMinimapOptions();
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyToggleRes then
-		if UserConfiguration.ShowMapResources() then
-			UserConfiguration.ShowMapResources( false );
-		else
-			UserConfiguration.ShowMapResources( true );
-		end
-		UI.PlaySound("Play_UI_Click");
-		LuaEvents.MinimapPanel_RefreshMinimapOptions();
-
-	elseif actionId == m_actionHotkeyToggleYield then
-		if UserConfiguration.ShowMapYield() then    -- yield already visible, hide
-			LuaEvents.MinimapPanel_HideYieldIcons();
-			UserConfiguration.ShowMapYield( false );
-		else
-			LuaEvents.MinimapPanel_ShowYieldIcons();
-			UserConfiguration.ShowMapYield( true );
-		end
-
-		LuaEvents.MinimapPanel_RefreshMinimapOptions();
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyPrevUnit then
-		UI.SelectPrevReadyUnit();
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyNextUnit then
-		UI.SelectNextReadyUnit();
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyPrevCity then
-		local curCity:table = UI.GetHeadSelectedCity();
-		UI.SelectPrevCity(curCity);
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyNextCity then
-		local curCity:table = UI.GetHeadSelectedCity();
-		UI.SelectNextCity(curCity);
-		UI.PlaySound("Play_UI_Click");
-
-	elseif actionId == m_actionHotkeyCapitalCity then
-		local capital;
-		local ePlayer = Game.GetLocalPlayer();
-		local player = Players[ePlayer];
-		if(player) then
-			local cities = player:GetCities();
-			for i, city in cities:Members() do
-				if(city:IsCapital()) then
-					capital = city;
-					break;
-				end
-			end
-		end
-
-		if(capital) then
-			UI.SelectNextCity(capital);
-			UI.PlaySound("Play_UI_Click");
-		end
-	elseif actionId == m_actionHotkeyOnlinePause then
-		if GameConfiguration.IsNetworkMultiplayer() then
-			TogglePause();
-		end
-	end
-end
-
--- ===========================================================================
---	INCLUDES
---	Other handlers & helpers that may utilze functionality defined in here
--- ===========================================================================
-
-include ("StrategicView_MapPlacement");	-- handlers for: BUILDING_PLACEMENT, DISTRICT_PLACEMENT
-include ("StrategicView_DebugSupport");	-- the Debug interface mode
-
-
--- ===========================================================================
---	Assign callbacks
--- ===========================================================================
-function Initialize()
+function LateInitialize()
 
 	g_isTouchEnabled = Options.GetAppOption("UI", "IsTouchScreenEnabled") ~= 0;
 
@@ -3343,6 +3492,7 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.AIR_ATTACK]			[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_Air_Attack;
 	InterfaceModeMessageHandler[InterfaceModeTypes.DEBUG]				[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_Debug;
 	InterfaceModeMessageHandler[InterfaceModeTypes.CITY_MANAGEMENT]		[INTERFACEMODE_ENTER]		= OnInterfaceModeEnter_CityManagement; 
+	InterfaceModeMessageHandler[InterfaceModeTypes.CINEMATIC]			[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_Cinematic;
 	InterfaceModeMessageHandler[InterfaceModeTypes.WMD_STRIKE]			[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_WMD_Strike;
 	InterfaceModeMessageHandler[InterfaceModeTypes.ICBM_STRIKE]			[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_ICBM_Strike;
 	InterfaceModeMessageHandler[InterfaceModeTypes.COASTAL_RAID]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_CoastalRaid;
@@ -3357,6 +3507,7 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.MAKE_TRADE_ROUTE]	[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_MakeTradeRoute;
 	InterfaceModeMessageHandler[InterfaceModeTypes.TELEPORT_TO_CITY]	[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_TeleportToCity;
 	InterfaceModeMessageHandler[InterfaceModeTypes.MOVE_TO]				[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_MoveTo;
+	InterfaceModeMessageHandler[InterfaceModeTypes.NATURAL_WONDER]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_Cinematic;			-- DEPRECATED mode
 	InterfaceModeMessageHandler[InterfaceModeTypes.RANGE_ATTACK]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_UnitRangeAttack;
 	InterfaceModeMessageHandler[InterfaceModeTypes.REBASE]				[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_ReBase;
 	InterfaceModeMessageHandler[InterfaceModeTypes.SELECTION]			[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_Selection;
@@ -3365,7 +3516,10 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_WBSelectPlot;
 	InterfaceModeMessageHandler[InterfaceModeTypes.SPY_CHOOSE_MISSION]	[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_SpyChooseMission;
 	InterfaceModeMessageHandler[InterfaceModeTypes.SPY_TRAVEL_TO_CITY]	[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_SpyTravelToCity;
-	InterfaceModeMessageHandler[InterfaceModeTypes.NATURAL_WONDER]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_NaturalWonder;
+	InterfaceModeMessageHandler[InterfaceModeTypes.FULLSCREEN_MAP]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_FullscreenMap;
+	InterfaceModeMessageHandler[InterfaceModeTypes.CITY_SELECTION]		[INTERFACEMODE_ENTER]		= OnInterfaceModeChange_CitySelection;
+
+	
 	
 	-- Interface Mode LEAVING (optional):
 	InterfaceModeMessageHandler[InterfaceModeTypes.BUILDING_PLACEMENT]		[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_BuildingPlacement;	-- StrategicView_MapPlacement.lua
@@ -3373,7 +3527,8 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.DISTRICT_PLACEMENT]		[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_DistrictPlacement; -- StrategicView_MapPlacement.lua	
 	InterfaceModeMessageHandler[InterfaceModeTypes.MOVE_TO]					[INTERFACEMODE_LEAVE]		= OnInterfaceModeChange_MoveToLeave;
 	InterfaceModeMessageHandler[InterfaceModeTypes.RANGE_ATTACK]			[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_UnitRangeAttack; 
-	InterfaceModeMessageHandler[InterfaceModeTypes.NATURAL_WONDER]			[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_NaturalWonder;
+	InterfaceModeMessageHandler[InterfaceModeTypes.CINEMATIC]				[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_Cinematic;
+	InterfaceModeMessageHandler[InterfaceModeTypes.NATURAL_WONDER]			[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_Cinematic;			-- DEPRECATED mode
 	InterfaceModeMessageHandler[InterfaceModeTypes.CITY_RANGE_ATTACK]		[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_CityRangeAttack;
 	InterfaceModeMessageHandler[InterfaceModeTypes.DISTRICT_RANGE_ATTACK]	[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_DistrictRangeAttack;
 	InterfaceModeMessageHandler[InterfaceModeTypes.AIR_ATTACK]				[INTERFACEMODE_LEAVE]		= OnInterfaceModeLeave_Air_Attack;
@@ -3394,6 +3549,7 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.MOVE_TO]					[KeyEvents.KeyUp]		= OnPlacementKeyUp;
 	InterfaceModeMessageHandler[InterfaceModeTypes.RANGE_ATTACK]			[KeyEvents.KeyUp]		= OnPlacementKeyUp;
 	InterfaceModeMessageHandler[InterfaceModeTypes.NATURAL_WONDER]			[KeyEvents.KeyUp]		= OnPlacementKeyUp;
+	InterfaceModeMessageHandler[InterfaceModeTypes.CINEMATIC]				[KeyEvents.KeyUp]		= OnPlacementKeyUp;
 	InterfaceModeMessageHandler[InterfaceModeTypes.CITY_RANGE_ATTACK]		[KeyEvents.KeyUp]		= OnPlacementKeyUp;
 	InterfaceModeMessageHandler[InterfaceModeTypes.DISTRICT_RANGE_ATTACK]	[KeyEvents.KeyUp]		= OnPlacementKeyUp;
 	InterfaceModeMessageHandler[InterfaceModeTypes.WMD_STRIKE]				[KeyEvents.KeyUp]		= OnPlacementKeyUp;
@@ -3451,7 +3607,8 @@ function Initialize()
 	InterfaceModeMessageHandler[InterfaceModeTypes.COASTAL_RAID]		[MouseEvents.LButtonUp]		= CoastalRaid;
 	InterfaceModeMessageHandler[InterfaceModeTypes.PLACE_MAP_PIN]		[MouseEvents.LButtonUp]		= PlaceMapPin;
 	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[MouseEvents.LButtonUp]		= OnMouseEnd_WBSelectPlot;
-	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[MouseEvents.RButtonUp]		= OnRButtonUp_WBSelectPlot;
+	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[MouseEvents.RButtonUp]  	= OnRButtonUp_WBSelectPlot;
+	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[MouseEvents.RButtonDown]  	= OnRButtonDown_WBSelectPlot;
 	InterfaceModeMessageHandler[InterfaceModeTypes.WB_SELECT_PLOT]		[MouseEvents.MouseMove]		= OnMouseMove_WBSelectPlot;
 
 	-- Touch Events (if a touch system)
@@ -3503,7 +3660,9 @@ function Initialize()
 	Events.InterfaceModeChanged.Add(OnInterfaceModeChanged);
 	Events.MultiplayerGameLastPlayer.Add(OnMultiplayerGameLastPlayer);
 	Events.MultiplayerGameAbandoned.Add(OnMultiplayerGameAbandoned);
+	Events.MatchEndTurnComplete.Add(OnMatchEndTurnComplete);
 	Events.UnitSelectionChanged.Add( OnUnitSelectionChanged );
+	Events.UnitCommandStarted.Add( OnUnitCommandStarted );
 
 	-- LUA Events
 	LuaEvents.Tutorial_ConstrainMovement.Add( OnTutorial_ConstrainMovement );
@@ -3518,16 +3677,147 @@ function Initialize()
 	LuaEvents.Tutorial_AddUnitMoveRestriction.Add( OnTutorial_AddUnitMoveRestriction );
 	LuaEvents.Tutorial_RemoveUnitMoveRestrictions.Add( OnTutorial_RemoveUnitMoveRestrictions );
 
-	LuaEvents.InGameTopOptionsMenu_Show.Add(function() m_isPauseMenuOpen = true; end);
-	LuaEvents.InGameTopOptionsMenu_Close.Add(function() m_isPauseMenuOpen = false; ClearAllCachedInputState(); end);
+	LuaEvents.InGameTopOptionsMenu_Show.Add(OnBlockInput);
+	LuaEvents.InGameTopOptionsMenu_Close.Add(OnUnblockInput);
+
+	LuaEvents.DiploScene_SceneClosed.Add(OnUnblockInput);
+	LuaEvents.DiploScene_SceneOpened.Add(OnBlockInput);
+	
+	LuaEvents.FullscreenMap_Shown.Add(OnBlockInput);
+	LuaEvents.FullscreenMap_Closed.Add(OnUnblockInput);
+end
+
+-- ===========================================================================
+--	Load all static information as well as display information for the
+--	current local player.
+-- ===========================================================================
+function OnInit( isReload:boolean )
+	LateInitialize();
+end
+
+
+-- ===========================================================================
+--	UI Event
+-- ===========================================================================
+function OnShutdown()
+	-- Clean up events
+	Events.CycleUnitSelectionRequest.Remove( OnCycleUnitSelectionRequest );
+	Events.InterfaceModeChanged.Remove( OnInterfaceModeChanged );
+	
+	LuaEvents.Tutorial_ConstrainMovement.Remove( OnTutorial_ConstrainMovement );
+	LuaEvents.Tutorial_DisableMapDrag.Remove( OnTutorial_DisableMapDrag );
+	LuaEvents.Tutorial_DisableMapSelect.Remove( OnTutorial_DisableMapSelect );
+end
+
+-- ===========================================================================
+--	Hotkey Event
+-- ===========================================================================
+function OnInputActionTriggered( actionId:number )
+	if actionId == m_actionHotkeyToggleGrid then
+		LuaEvents.MinimapPanel_ToggleGrid();
+		LuaEvents.MinimapPanel_RefreshMinimapOptions();
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyToggleRes then
+		if UserConfiguration.ShowMapResources() then
+			UserConfiguration.ShowMapResources( false );
+		else
+			UserConfiguration.ShowMapResources( true );
+		end
+		UI.PlaySound("Play_UI_Click");
+		LuaEvents.MinimapPanel_RefreshMinimapOptions();
+
+	elseif actionId == m_actionHotkeyToggleYield then
+		if UserConfiguration.ShowMapYield() then    -- yield already visible, hide
+			LuaEvents.PlotInfo_HideYieldIcons();
+			UserConfiguration.ShowMapYield( false );
+		else
+			LuaEvents.PlotInfo_ShowYieldIcons();
+			UserConfiguration.ShowMapYield( true );
+		end
+
+		LuaEvents.MinimapPanel_RefreshMinimapOptions();
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyPrevUnit then
+		UI.SelectPrevReadyUnit();
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyNextUnit then
+		UI.SelectNextReadyUnit();
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyPrevCity then
+		local curCity:table = UI.GetHeadSelectedCity();
+		UI.SelectPrevCity(curCity);
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyNextCity then
+		local curCity:table = UI.GetHeadSelectedCity();
+		UI.SelectNextCity(curCity);
+		UI.PlaySound("Play_UI_Click");
+
+	elseif actionId == m_actionHotkeyCapitalCity then
+		local capital;
+		local ePlayer = Game.GetLocalPlayer();
+		local player = Players[ePlayer];
+		if(player) then
+			local cities = player:GetCities();
+			for i, city in cities:Members() do
+				if(city:IsCapital()) then
+					capital = city;
+					break;
+				end
+			end
+		end
+
+		if(capital) then
+			UI.SelectNextCity(capital);
+			UI.PlaySound("Play_UI_Click");
+		end
+	elseif actionId == m_actionHotkeyOnlinePause then
+		if (GameConfiguration.IsNetworkMultiplayer() and Network.IsMatchMaking()==false) then
+			TogglePause();
+		end
+	end
+end
+
+-- Alt-F4 in some situations can cause m_isALTDown to be stuck on after you click "Cancel", so clear it here.
+function OnUserRequestClose()
+	m_isALTDown  = false;
+end
+
+-- called when Hot Seat changes players
+function OnLocalPlayerChanged()
+	ClearMovementPath();
+end
+
+-- ===========================================================================
+--	INCLUDES
+--	Other handlers & helpers that may utilze functionality defined above.
+-- ===========================================================================
+
+include ("StrategicView_MapPlacement");	-- handlers for: BUILDING_PLACEMENT, DISTRICT_PLACEMENT
+include ("StrategicView_DebugSupport");	-- the Debug interface mode
+
+
+-- ===========================================================================
+--	Assign callbacks
+-- ===========================================================================
+function Initialize()
+
+	Shake_Clear( m_ShakeTracker );
 
 	-- UI Events
+	ContextPtr:SetInitHandler( OnInit );
 	ContextPtr:SetInputHandler( OnInputHandler, true );
+	ContextPtr:SetShutdown( OnShutdown );
 	ContextPtr:SetRefreshHandler( OnRefresh );
 	ContextPtr:SetAppRegainedFocusHandler( OnAppRegainedFocusHandler );
 	ContextPtr:SetAppLostFocusHandler( OnAppLostFocusHandler );
-	ContextPtr:SetShutdown( OnShutdown );
-	
+    Events.UserRequestClose.Add( OnUserRequestClose );
+	Events.LocalPlayerChanged.Add( OnLocalPlayerChanged );
+		
 	Controls.DebugStuff:SetHide(not m_isDebuging);
 	-- Popup setup
 	m_kConfirmWarDialog = PopupDialogInGame:new( "ConfirmWarPopup" );

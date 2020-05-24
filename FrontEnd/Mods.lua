@@ -3,6 +3,7 @@
 -------------------------------------------------
 include( "InstanceManager" );
 include( "SupportFunctions" );
+include( "PopupDialog" );
 
 LOC_MODS_SEARCH_NAME = Locale.Lookup("LOC_MODS_SEARCH_NAME");
 
@@ -100,6 +101,11 @@ function RefreshListings()
 				name = name .. " [COLOR_RED](" .. Locale.Lookup("LOC_MODS_DETAILS_OWNERSHIP_NO") .. ")[ENDCOLOR]";
 			end
 
+			if(Modding.ShouldShowCompatibilityWarnings()) then
+				if(not Modding.IsModCompatible(v.Handle) and not Modding.GetIgnoreCompatibilityWarnings(v.Handle)) then
+					name = name .. " [COLOR_RED](" .. Locale.Lookup("LOC_MODS_DETAILS_COMPATIBLE_NOT") .. ")[ENDCOLOR]";
+				end
+			end
 
 			instance.ModTitle:LocalizeAndSetText(name);
 
@@ -118,8 +124,11 @@ function RefreshListings()
 				instance.ModEnabled:SetText("[COLOR_RED]" .. Locale.Lookup("LOC_MODS_DISABLED") .. "[ENDCOLOR]");
 			end
 
-			instance.OfficialIcon:SetHide(v.Official ~= true);
-			instance.CommunityIcon:SetHide(v.Official == true);
+			local bOfficial = v.Official;
+			local bIsMap = v.Source == "Map";
+			instance.MapIcon:SetHide(not bIsMap);
+			instance.OfficialIcon:SetHide(bIsMap or not bOfficial);
+			instance.CommunityIcon:SetHide(bIsMap or bOfficial);
 		end
 
 		if(hasEnabledMods) then
@@ -241,15 +250,33 @@ function RefreshModDetails()
 		local modHandle = g_SelectedModHandle;
 		local info = Modding.GetModInfo(modHandle);
 
-		if(info.Official) then
+		local bIsMap = info.Source == "Map";
+
+		if(bIsMap) then
+			Controls.ModContent:LocalizeAndSetText("LOC_MODS_WORLDBUILDER_CONTENT");
+		elseif(info.Official) then
 			Controls.ModContent:LocalizeAndSetText("LOC_MODS_FIRAXIAN_CONTENT");
 		else
 			Controls.ModContent:LocalizeAndSetText("LOC_MODS_USER_CONTENT");
 		end
 
+		local compatible = Modding.IsModCompatible(modHandle);
+		Controls.ModCompatibilityWarning:SetHide(compatible);
+		Controls.WhitelistMod:SetHide(compatible);
+
+		if(not compatible) then
+			Controls.WhitelistMod:SetCheck(Modding.GetIgnoreCompatibilityWarnings(modHandle));
+			Controls.WhitelistMod:RegisterCallback(Mouse.eLClick, function()
+				Modding.SetIgnoreCompatibilityWarnings(modHandle, Controls.WhitelistMod:IsChecked());
+				RefreshListings();
+			end);
+		end
+
 		-- Official/Community Icons
-		Controls.OfficialIcon:SetHide(not info.Official);
-		Controls.CommunityIcon:SetHide(info.Official);
+		local bIsOfficial = info.Official;
+		Controls.MapIcon:SetHide(not bIsMap);
+		Controls.OfficialIcon:SetHide(bIsMap or not bIsOfficial);
+		Controls.CommunityIcon:SetHide(bIsMap or bIsOfficial);
 
 		local enableButton = Controls.EnableButton;
 		local disableButton = Controls.DisableButton;
@@ -291,13 +318,27 @@ function RefreshModDetails()
 						tip[1] = Locale.Lookup("LOC_MODS_DISABLE_ERROR") .. err;
 					end
 
+					local unique_items = {};
 					for k,ref in ipairs(items) do
-						local item = "[ICON_BULLET] " .. Locale.Lookup(ref.Name);
-						if(error_suffix) then
-							item = item .. " " .. error_suffix;
-						end
+						if(unique_items[ref.Id] == nil) then
+							unique_items[ref.Id] = true;
 
-						table.insert(tip, item);
+							local name = ref.Id;
+							if(ref.Name) then
+								name = Locale.LookupBundle(ref.Name);
+								if(name == nil) then
+									name = Locale.Lookup(ref.Name);
+								end
+							end
+
+							local item = "[ICON_BULLET] " .. name;
+							if(error_suffix) then
+								item = item .. " " .. error_suffix;
+							end
+
+							table.insert(tip, item);
+						end
+						
 					end
 
 					disableButton:SetToolTipString(table.concat(tip, "[NEWLINE]"));
@@ -317,8 +358,24 @@ function RefreshModDetails()
 					if(xtra and #xtra > 0) then
 						-- Generate tip w/ list of mods to enable.
 						local tip = {Locale.Lookup("LOC_MODS_ENABLE_INCLUDE")};
+
+
+						local unique_items = {};
 						for k,ref in ipairs(xtra) do
-							table.insert(tip, "[ICON_BULLET] " .. Locale.Lookup(ref.Name));
+							if(unique_items[ref.Id] == nil) then
+								unique_items[ref.Id] = true;
+
+								local name = ref.Id;
+								if(ref.Name) then
+									name = Locale.LookupBundle(ref.Name);
+									if(name == nil) then
+										name = Locale.Lookup(ref.Name);
+									end
+								end
+
+								local item = "[ICON_BULLET] " .. name;
+								table.insert(tip, item);
+							end	
 						end
 
 						enableButton:SetToolTipString(table.concat(tip, "[NEWLINE]"));
@@ -326,10 +383,26 @@ function RefreshModDetails()
 						enableButton:SetToolTipString(nil);
 					end
 
-					enableButton:RegisterCallback(Mouse.eLClick, function()
+					local OnEnable = function()
 						Modding.EnableMod(modHandle, true);
 						RefreshListings();
-					end);
+					end
+
+					if(	Modding.ShouldShowCompatibilityWarnings() and 
+						not Modding.IsModCompatible(modHandle) and 
+						not Modding.GetIgnoreCompatibilityWarnings(modHandle)) then
+
+						enableButton:RegisterCallback(Mouse.eLClick, function()
+							m_kPopupDialog:AddText(Locale.Lookup("LOC_MODS_ENABLE_WARNING_NOT_COMPATIBLE"));
+							m_kPopupDialog:AddTitle(Locale.ToUpper(Locale.Lookup("LOC_MODS_TITLE")));
+							m_kPopupDialog:AddButton(Locale.Lookup("LOC_YES_BUTTON"), OnEnable, nil, nil, "PopupButtonInstanceGreen"); 
+							m_kPopupDialog:AddButton(Locale.Lookup("LOC_NO_BUTTON"), nil);
+							m_kPopupDialog:Open();
+						end);
+
+					else
+						enableButton:RegisterCallback(Mouse.eLClick, OnEnable);
+					end
 				else
 					enableButton:SetDisabled(true);
 					
@@ -344,13 +417,26 @@ function RefreshModDetails()
 						end
 
 						local tip = {Locale.Lookup("LOC_MODS_ENABLE_ERROR")};
-						for k,ref in ipairs(xtra) do
-							local item = "[ICON_BULLET] " .. Locale.Lookup(ref.Name);
-							if(error_suffix) then
-								item = item .. " " .. error_suffix;
-							end
 
-							table.insert(tip, item);
+						local unique_items = {};
+						for k,ref in ipairs(xtra) do
+							if(unique_items[ref.Id] == nil) then
+								unique_items[ref.Id] = true;
+
+								local name = ref.Id;
+								if(ref.Name) then
+									name = Locale.LookupBundle(ref.Name);
+									if(name == nil) then
+										name = Locale.Lookup(ref.Name);
+									end
+								end
+
+								local item = "[ICON_BULLET] " .. name;
+								if(error_suffix) then
+									item = item .. " " .. error_suffix;
+								end
+								table.insert(tip, item);
+							end	
 						end
 
 						enableButton:SetToolTipString(table.concat(tip, "[NEWLINE]"));
@@ -362,6 +448,12 @@ function RefreshModDetails()
 
 		Controls.ModTitle:LocalizeAndSetText(info.Name, 64);
 		Controls.ModIdVersion:SetText(info.Id);
+		if(bIsMap) then
+			Controls.ModFileName:SetText(info.SourceFileName);
+			Controls.ModFileName:SetHide(false);
+		else
+			Controls.ModFileName:SetHide(true);
+		end
 
 		local desc = Modding.GetModProperty(g_SelectedModHandle, "Description") or info.Teaser;
 		if(desc) then
@@ -401,6 +493,16 @@ function RefreshModDetails()
 			Controls.ModSpecialThanksValue:SetHide(true);
 		end
 
+		local created = info.Created;
+		if(created) then
+			Controls.ModCreatedValue:LocalizeAndSetText("{1_Created : date long}", created);
+			Controls.ModCreatedCaption:SetHide(false);		
+			Controls.ModCreatedValue:SetHide(false);
+		else
+			Controls.ModCreatedCaption:SetHide(true);
+			Controls.ModCreatedValue:SetHide(true);
+		end
+
 		if(info.Official and info.Allowance ~= nil) then
 			
 			Controls.ModOwnershipCaption:SetHide(false);
@@ -438,13 +540,20 @@ function RefreshModDetails()
 
 		local dependencies, references, blocks = Modding.GetModAssociations(g_SelectedModHandle);
 
-	
-
 		g_DependencyListingsManager:ResetInstances();
 		if(dependencies) then
 			local dependencyStrings = {}
 			for i,v in ipairs(dependencies) do
-				dependencyStrings[i] = Locale.Lookup(v.Name);
+				
+				local name = v.Name;
+				if(name) then
+					local text = Locale.LookupBundle(name);
+					if(text == nil) then
+						text = Locale.Lookup(name);
+					end
+
+					dependencyStrings[i] = text or name;
+				end				
 			end
 			table.sort(dependencyStrings, function(a,b) return Locale.Compare(a,b) == -1 end);
 
@@ -532,8 +641,42 @@ function EnableAllMods()
 			table.insert(modHandles, v.Handle);
 		end
 	end
-	Modding.EnableMod(modHandles);
-	RefreshListings();
+
+	if(	Modding.ShouldShowCompatibilityWarnings()) then
+		local whitelistMods = false;
+		local incompatibleMods = {};
+		for i,v in ipairs(modHandles) do
+			if(	not Modding.IsModCompatible(v) and 
+				not Modding.GetIgnoreCompatibilityWarnings(v)) then
+				table.insert(incompatibleMods, v);
+			end
+		end
+
+		function OnYes()
+			if(whitelistMods) then
+				for i,v in ipairs(incompatibleMods) do
+					Modding.SetIgnoreCompatibilityWarnings(v, true);
+				end
+			end
+
+			Modding.EnableMod(modHandles);
+			RefreshListings();
+		end
+
+		if(#incompatibleMods > 0) then
+			m_kPopupDialog:AddText(Locale.Lookup("LOC_MODS_ENABLE_WARNING_NOT_COMPATIBLE_MANY"));
+			m_kPopupDialog:AddTitle(Locale.ToUpper(Locale.Lookup("LOC_MODS_TITLE")));
+			m_kPopupDialog:AddButton(Locale.Lookup("LOC_YES_BUTTON"), OnYes, nil, nil, "PopupButtonInstanceGreen"); 
+			m_kPopupDialog:AddButton(Locale.Lookup("LOC_NO_BUTTON"), nil);
+			m_kPopupDialog:AddCheckBox(Locale.Lookup("LOC_MODS_WARNING_WHITELIST_MANY"), false, function(checked) whitelistMods = checked; end);
+			m_kPopupDialog:Open();
+		else
+			OnYes();
+		end
+	else	
+		Modding.EnableMod(modHandles);
+		RefreshListings();
+	end
 end
 
 function DisableAllMods()
@@ -597,6 +740,8 @@ function RefreshSubscriptionItem(item)
 		instance.LastUpdated:SetText(Locale.Lookup("LOC_MODS_LAST_UPDATED", details.LastUpdated));
 	end
 	
+	instance.UnsubscribeButton:SetHide(true);
+
 	local status = details.Status;
 	instance.SubscriptionDownloadProgress:SetHide(status ~= "Downloading");
 	if(status == "Downloading") then
@@ -646,11 +791,16 @@ function RefreshSubscriptionItem(item)
 			end);
 		else
 			instance.SubscriptionUpdateButton:SetHide(true);
+			instance.UnsubscribeButton:SetHide(false);
+			instance.UnsubscribeButton:RegisterCallback(Mouse.eLClick, function()
+				Modding.Unsubscribe(subscriptionId);
+				instance.SubscriptionInstanceRoot:SetHide(true);
+			end);
 		end
 	end
 
 
-
+	instance.SubscriptionInstanceRoot:SetHide(false);
 	item.NeedsRefresh = needsRefresh;
 end
 ----------------------------------------------------------------  
@@ -693,17 +843,15 @@ end
 function InputHandler( uiMsg, wParam, lParam )
 	if uiMsg == KeyEvents.KeyUp then
 		if wParam == Keys.VK_ESCAPE then
-
 			if(Controls.NameModGroupPopup ~= nil and Controls.NameModGroupPopup:IsVisible()) then
 				Controls.NameModGroupPopup:SetHide(true);
 			else
 				HandleExitRequest();
 			end
+			return true;
 		end
 	end
-
-	-- TODO: Is this needed?
-	return true;
+	return false;
 end
 ContextPtr:SetInputHandler( InputHandler );
 
@@ -738,29 +886,19 @@ function OnOpenWorkshop()
 	end
 end
 
-----------------------------------------------------------------  
-function OnWorldBuilder()
-	local worldBuilderMenu = ContextPtr:LookUpControl("/FrontEnd/MainMenu/WorldBuilder");
-	if (worldBuilderMenu ~= nil) then
-		GameConfiguration.SetWorldBuilderEditor(true);
-		UIManager:QueuePopup(worldBuilderMenu, PopupPriority.Current);
-	end
-end
-
 ----------------------------------------------------------------    
 function OnShow()
 	OnInstalledModsTabClick(true);
 
-	if(GameConfiguration.IsAnyMultiplayer() or not UI.HasFeature("WorldBuilder")) then
-		Controls.WorldBuilder:SetHide(true);
+	if(GameConfiguration.IsAnyMultiplayer()) then
 		Controls.BrowseWorkshop:SetHide(true);
 	else
-		Controls.WorldBuilder:SetHide(false);
 		Controls.BrowseWorkshop:SetHide(false);
 	end
 end	
 ----------------------------------------------------------------    
 function HandleExitRequest()
+	GameConfiguration.UpdateEnabledMods();
 	UIManager:DequeuePopup( ContextPtr );
 end
 ----------------------------------------------------------------  
@@ -809,20 +947,44 @@ end
 -- Must exist below callback function names
 ---------------------------------------------------------------------------
 function SortListingsByName(mods)
+	-- Keep XP1 and XP2 at the top of the list, regardless of sort.
+	local sortOverrides = {
+		["4873eb62-8ccc-4574-b784-dda455e74e68"] = -2,
+		["1B28771A-C749-434B-9053-D1380C553DE9"] = -1
+	};
+
 	table.sort(mods, function(a,b) 
-		return Locale.Compare(a.StrippedDisplayName, b.StrippedDisplayName) == -1;
+		local aSort = sortOverrides[a.Id] or 0;
+		local bSort = sortOverrides[b.Id] or 0;
+
+		if(aSort ~= bSort) then
+			return aSort < bSort;
+		else
+			return Locale.Compare(a.StrippedDisplayName, b.StrippedDisplayName) == -1;
+		end
 	end);
 end
 ---------------------------------------------------------------------------
 function SortListingsByEnabled(mods)
-	table.sort(mods, function(a,b)
-		if(a.Enabled == b.Enabled) then
+	-- Keep XP1 and XP2 at the top of the list, regardless of sort.
+	local sortOverrides = {
+		["4873eb62-8ccc-4574-b784-dda455e74e68"] = -2,
+		["1B28771A-C749-434B-9053-D1380C553DE9"] = -1
+	};
+
+	table.sort(mods, function(a,b) 
+		local aSort = sortOverrides[a.Id] or 0;
+		local bSort = sortOverrides[b.Id] or 0;
+
+		if(aSort ~= bSort) then
+			return aSort < bSort;
+		elseif(a.Enabled ~= b.Enabled) then
+			return a.Enabled;
+		else
 			-- Sort by Name.
 			return Locale.Compare(a.StrippedDisplayName, b.StrippedDisplayName) == -1;
-		else
-			return a.Enabled;
 		end
-	end);	
+	end);
 end
 ---------------------------------------------------------------------------
 local g_SortListingsOptions = {
@@ -852,6 +1014,8 @@ function InitializeSortListingsPulldown()
 end
 
 function Initialize()
+	m_kPopupDialog = PopupDialog:new( "Mods" );
+
 	Controls.EnableAll:RegisterCallback(Mouse.eLClick, EnableAllMods);
 	Controls.DisableAll:RegisterCallback(Mouse.eLClick, DisableAllMods);
 	Controls.CreateModGroup:RegisterCallback(Mouse.eLClick, CreateModGroup);
@@ -863,19 +1027,15 @@ function Initialize()
 	Controls.SearchEditBox:RegisterStringChangedCallback(OnSearchCharCallback);
 	Controls.SearchEditBox:RegisterHasFocusCallback(OnSearchBarGainFocus);
 
-	Controls.ShowOfficialContent:RegisterCallback(Mouse.eLClick, function()
-		RefreshListings();
-	end);
-
-	Controls.ShowCommunityContent:RegisterCallback(Mouse.eLClick, function()
-		RefreshListings();
-	end);
+	local refreshListings = function() RefreshListings(); end;
+	Controls.ShowOfficialContent:RegisterCallback(Mouse.eLClick, refreshListings);
+	Controls.ShowCommunityContent:RegisterCallback(Mouse.eLClick, refreshListings);
 
 	Controls.CancelBindingButton:RegisterCallback(Mouse.eLClick, function()
 		Controls.NameModGroupPopup:SetHide(true);
 	end);
 
-	Controls.CreateModGroupButton:RegisterCallback(Mouse.eLCick, function()
+	Controls.CreateModGroupButton:RegisterCallback(Mouse.eLClick, function()
 		Controls.NameModGroupPopup:SetHide(true);
 		local groupName = Controls.ModGroupEditBox:GetText();
 		local currentGroup = Modding.GetCurrentModGroup();
@@ -908,7 +1068,7 @@ function Initialize()
 		Controls.SubscriptionsTab:SetHide(true);
 	end
 
-	local pFriends = Network:GetFriends();
+	local pFriends = Network.GetFriends();
 	if(pFriends ~= nil and pFriends:IsOverlayEnabled()) then
 		Controls.BrowseWorkshop:RegisterCallback( Mouse.eLClick, OnOpenWorkshop );
 		Controls.BrowseWorkshop:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
@@ -924,9 +1084,6 @@ function Initialize()
 	Controls.InstalledTab:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
 	Controls.CloseButton:RegisterCallback( Mouse.eLClick, HandleExitRequest );
 	Controls.CloseButton:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
-
-	Controls.WorldBuilder:RegisterCallback(Mouse.eLClick, OnWorldBuilder);
-	Controls.WorldBuilder:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
 
 	ContextPtr:SetShowHandler( OnShow );
 	ContextPtr:SetUpdate(OnUpdate);
