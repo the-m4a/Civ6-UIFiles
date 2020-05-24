@@ -91,19 +91,19 @@ function TutorialLoader:Initialize(TutorialCheck:ifunction)
 
 	------------------
 	Events.CulturalIdentityCityConverted.Add(function(player, cityID, fromPlayer)
-		local ePlayer :number = Game.GetLocalPlayer();
-		if ePlayer == PlayerTypes.NONE or ePlayer == PlayerTypes.OBSERVER then return; end
+		local ePlayer = Game.GetLocalPlayer();
+		local bRevealed = false;
 
-		local bRevealed :boolean = false;
-		local pCity		:object = CityManager.GetCity(player, cityID);
+		local pCity = CityManager.GetCity(player, cityID);
 		if (pCity ~= nil) then
-			local localPlayerVis:table = PlayersVisibility[ePlayer];
+			local localPlayerVis:table = PlayersVisibility[Game.GetLocalPlayer()];
 			if localPlayerVis:IsRevealed(pCity:GetX(), pCity:GetY()) then
 				m_CityID = { Player = player, CityID = cityID };
 				bRevealed = true;
 			end			
 		end
-				
+
+		
 		if(bRevealed == true) then
 			if (fromPlayer == ePlayer) then
 				if (not Players[player]:IsMajor()) then
