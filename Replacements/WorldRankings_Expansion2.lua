@@ -698,7 +698,9 @@ function ViewDiplomatic(victoryType:string)
 
 	for i, theData in ipairs(ourData) do
 		if #theData.teamData.PlayerData > 1 then
-			PopulateGenericTeamInstance(m_GenericTeamIM:GetInstance(), theData.teamData, victoryType);
+			local uiGenericInstance:table = m_GenericTeamIM:GetInstance()
+			uiGenericInstance.ButtonBG:SetToolTipString("");
+			PopulateGenericTeamInstance(uiGenericInstance, theData.teamData, victoryType);
 		else
 			local uiGenericInstance:table = m_GenericIM:GetInstance();
 			local pPlayer:table = Players[theData.teamData.PlayerData[1].PlayerID];

@@ -255,13 +255,6 @@ function RefreshCurrentEvent()
                 UI.DataError("Unable to find IconLarge for RandomEvents type: " .. kCurrentEventDef.PrimaryKey);
             end
 
-			-- Get the territory name as a back up to continent name
-			local territoryName:string = nil;
-			local pTerritory:object = Territories.GetTerritoryAt(kCurrentEvent.CurrentLocation);
-			if pTerritory then
-				territoryName = pTerritory:GetName();
-			end
-
 			-- Current Location and Direction
 			local location:string = "";
 			if pCurrentPlot ~= nil then
@@ -269,8 +262,6 @@ function RefreshCurrentEvent()
 				if eContinentType and eContinentType ~= -1 then
 					local kContinentDef:table = GameInfo.Continents[eContinentType];
 					location = Locale.ToUpper(kContinentDef.Description);
-				elseif territoryName ~= nil then
-					location = territoryName;
 				else
 					location = Locale.Lookup("LOC_CLIMATE_SCREEN_WATER");
 				end
@@ -672,13 +663,6 @@ function CreateEventInstance( kEvent:table, kEventDef:table, iTurn:number )
 		kInstance.NameContainer:SetToolTipString(tooltip);
 	end
 
-	-- Get the territory name as a back up to continent name
-	local territoryName:string = nil;
-	local pTerritory:object = Territories.GetTerritoryAt(kEvent.StartLocation);
-	if pTerritory then
-		territoryName = pTerritory:GetName();
-	end
-
 	-- Location
 	local pPlot:table = Map.GetPlotByIndex(kEvent.StartLocation);
 	if pPlot ~= nil then
@@ -686,8 +670,6 @@ function CreateEventInstance( kEvent:table, kEventDef:table, iTurn:number )
 		if eContinentType and eContinentType ~= -1 then
 			local kContinentDef:table = GameInfo.Continents[eContinentType];
 			kInstance.LocationString:SetText(Locale.Lookup(kContinentDef.Description));
-		elseif territoryName ~= nil then
-			kInstance.LocationString:SetText(territoryName);
 		else
 			kInstance.LocationString:SetText(Locale.Lookup("LOC_CLIMATE_SCREEN_WATER"));
 		end

@@ -36,7 +36,7 @@ end
 -- ===========================================================================
 function View(data)
 	XP1_View(data);
-	if (GameCapabilities.HasCapability("CAPABILITY_LENS_POWER") and GetSelectedTabButton() == m_PowerButtonInstance.Button) then
+	if GetSelectedTabButton() == m_PowerButtonInstance.Button then
 		RefreshPowerPanel();
 	end
 end
@@ -73,16 +73,14 @@ end
 function LateInitialize()
 	XP1_LateInitialize();
 
-	if(GameCapabilities.HasCapability("CAPABILITY_LENS_POWER"))then
-		m_PowerPanel = ContextPtr:LoadNewContext("CityPanelPower", Controls.PanelDynamicTab);
-		m_PowerPanel:SetSizeX(Controls.PanelDynamicTab:GetSizeX());
-		m_PowerPanel:SetSizeY(Controls.PanelDynamicTab:GetSizeY());
-		LuaEvents.CityPanel_ToggleOverviewPower.Add( OnTogglePowerTab );
+	m_PowerPanel = ContextPtr:LoadNewContext("CityPanelPower", Controls.PanelDynamicTab);
+	m_PowerPanel:SetSizeX(Controls.PanelDynamicTab:GetSizeX());
+	m_PowerPanel:SetSizeY(Controls.PanelDynamicTab:GetSizeY());
+	LuaEvents.CityPanel_ToggleOverviewPower.Add( OnTogglePowerTab );
 
-		m_PowerButtonInstance = GetTabButtonInstance();
-		m_PowerButtonInstance.Icon:SetIcon("ICON_STAT_POWER");
-		m_PowerButtonInstance.Button:SetToolTipString(Locale.Lookup(m_ToolTip));
+	m_PowerButtonInstance = GetTabButtonInstance();
+	m_PowerButtonInstance.Icon:SetIcon("ICON_STAT_POWER");
+	m_PowerButtonInstance.Button:SetToolTipString(Locale.Lookup(m_ToolTip));
 
-		AddTab(m_PowerButtonInstance.Button, OnSelectPowerTab );
-	end
+	AddTab(m_PowerButtonInstance.Button, OnSelectPowerTab );
 end

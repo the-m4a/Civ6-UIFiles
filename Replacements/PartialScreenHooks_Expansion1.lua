@@ -28,11 +28,10 @@ end
 
 -- ===========================================================================
 function AddScreenHooks()
-	AddWorldRankingsHook();
 	AddCityStateHook();
 	AddTradeHook();
 	AddEspionageHook();
-	AddEraHook();			-- XP1+
+	AddEraHook();
 	AddReportsHook();
 end
 

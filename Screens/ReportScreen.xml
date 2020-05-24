@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Context xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="..\..\..\..\..\CivTech\Libs\ForgeUI\ForgeUI_Assets\Controls.xsd">
-  <Include File="LeaderIcon"/>
-  <Container ID="" Style="FullScreenVignetteConsumer" Size="parent,parent-29"/>
 
-	<Box						ID="Main"						Anchor="C,C"									Size="1024,789"						Color="11,27,40,255">
+	<Container Style="FullScreenVignetteConsumer" />
+
+	<Box						ID="Main"						Anchor="C,C"									Size="1024,759"						Color="11,27,40,255">
 		<Grid															Anchor="C,C"									Size="parent+9,parent+9"	Style="WindowFrameTopOnly" />
 		<Button				ID="CloseButton"		Anchor="R,T"	Offset="-3,-1"	Size="44,44"																			Texture="Controls_CloseLarge"  />
 		<Image														Anchor="C,T"									Size="parent,44"					Color="61,112,154,255"	Texture="Controls_Gradient_HalfRadial"  />
@@ -19,15 +19,16 @@
 			<Image													Anchor="C,T"	Offset="0,4"		Size="parent-8,22"				Color="0,0,0,255" Texture="Controls_GradientSmall" />
 			<Container	ID="TabContainer"									Offset="0,0"		Size="parent,34" />
 			<Grid														Anchor="C,B"	Offset="0,0"		Size="parent-6,8"					Style="Divider3Grid" />
-      
-      <SlideAnim	ID="TabAnim"				Begin="0,0" End="0,0" Cycle="Once" Speed="3.5" Function="OutQuint" Size="67,68">
-        <Image		ID="TabArrow"				Texture="Controls_TabSelectArrow" Size="42,11"/>
-      </SlideAnim>
+		</Container>
+		<Container												Anchor="C,T"	Offset="0,44"		Size="parent,36">
+			<SlideAnim	ID="TabAnim"				Begin="0,0" End="0,0" Cycle="Once" Speed="3.5" Function="OutQuint" Size="67,68">
+				<Image		ID="TabArrow"				Texture="Controls_TabSelectArrow" Size="42,11"/>
+			</SlideAnim>
 		</Container>
 
 		<ScrollPanel	ID="Scroll"												Offset="4,84"		Size="parent-8,parent-188"				Vertical="1" AutoScrollBar="1" >
 			<Stack			ID="Stack"					Anchor="L,T"	Offset="0,1"		StackPadding="4" />
-			<ScrollBar											Anchor="R,C"	Offset="2,0"		Size="11,parent" AnchorSide="I,I"					Style="ScrollVerticalBarHighContrast" />
+			<ScrollBar											Anchor="R,C"	Offset="2,0"		Size="11,parent" AnchorSide="I,I"					Style="ScrollVerticalBarAlt" />
 		</ScrollPanel>
 		<Image														Anchor="C,T"	Offset="0,83"		Size="parent-8,22"				Color="0,0,0,255" Texture="Controls_GradientSmall" />
 
@@ -95,28 +96,28 @@
 					</Container>
 					<Container Size="6,1" />
 					<Grid																					 Offset="0,-4"	Size="94,29"	Style="YieldBacking" Color="24,156,216,150">
-						<Label													Anchor="L,C"								FontSize="16"	String="[ICON_ScienceLarge]"/>
+						<Label													Anchor="L,C"															String="[ICON_ScienceLarge]"/>
 						<Label		ID="ScienceBalance"		Anchor="C,C"															Style="ReportEndTotalText" ColorSet="ResScienceLabelCS" FontStyle="Stroke" String="0"/>
 					</Grid>
 					<Container Size="9,1" />
 					<Grid																					 Offset="0,-4"	Size="94,30"	Style="YieldBacking" Color="254,42,237,100">
-						<Label													Anchor="L,C"								FontSize="16"	String="[ICON_CultureLarge]"/>
+						<Label													Anchor="L,C"															String="[ICON_CultureLarge]"/>
 						<Label		ID="CultureBalance"		Anchor="C,C"															Style="ReportEndTotalText" ColorSet="ResCultureLabelCS" FontStyle="Stroke" String="0"/>
 					</Grid>
 					<Container Size="9,1" />
 					<Grid																					 Offset="0,-4"	Size="94,30"	Style="YieldBacking" Color="181,116,102,150" >
-						<Label													Anchor="L,C"								FontSize="16"	String="[ICON_TourismLarge]"/>
+						<Label													Anchor="L,C"															String="[ICON_TourismLarge]"/>
 						<Label		ID="TourismBalance"		Anchor="C,C"															Style="ReportEndTotalText" ColorSet="ResTourismLabelCS" String="0"	/>
 					</Grid>
 				</Stack>
 
 				<Stack																					 Offset="-4,85"	  StackGrowth="Right" Padding="4">
 					<Grid																													Size="101,26"	Style="YieldBacking" Color="185,176,70,150">
-						<Label													Anchor="L,C"								FontSize="16"	String="[ICON_GoldLarge]"/>
+						<Label													Anchor="L,C"															String="[ICON_GoldLarge]"/>
 						<Label		ID="GoldBalance"			Anchor="C,C"															Style="ReportEndTotalText" ColorSet="ResGoldLabelCS" String="0"	/>
 					</Grid>
 					<Grid																													Size="101,26"	Style="YieldBacking" Color="99,114,159,200"	>
-						<Label													Anchor="L,C"								FontSize="16"	String="[ICON_FaithLarge]"/>
+						<Label													Anchor="L,C"															String="[ICON_FaithLarge]"/>
 						<Label		ID="FaithBalance"			Anchor="C,C"															Style="ReportEndTotalText" ColorSet="ResFaithLabelCS" String="0" />
 					</Grid>
 				</Stack>
@@ -126,16 +127,16 @@
 		<Container		ID="BottomResourceTotals"	Anchor="C,B"	Offset="0,0"		Size="parent-6,100" >
 			<Grid																	Anchor="C,T"	Offset="0,0"		Size="parent,8"							Style="Divider3Grid" />
 			<Image																Anchor="C,B"	Offset="0,2"		Size="parent,parent"				Texture="Controls_Gradient" Color="255,255,255,32">
-				<Grid			ID="StrategicGrid"											Offset="5,10"		Size="parent-515,46"				Style="SubContainer4"				Color="36,50,62,255" InnerPadding="2,2">
-					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_STRATEGICS" TruncateWidth="100" TruncatedTooltip="1"/>
-					<Stack ID="StrategicResources"		Anchor="L,C"	Offset="110,0"	WrapWidth="400"	WrapGrowth="Down"	StackGrowth="Right" Padding="1"/>
+				<Grid			ID="StrategicGrid"											Offset="5,10"		Size="parent-515,40"				Style="SubContainer4"				Color="36,50,62,255" InnerPadding="2,2">
+					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_STRATEGICS" />
+					<Stack	ID="StrategicResources"		Anchor="L,C"	Offset="150,0"	WrapWidth="340"	WrapGrowth="Down"	StackGrowth="Right" />
 				</Grid>				
-				<Grid			ID="BonusGrid"													Offset="510,10"	Size="parent-515,46"				Style="SubContainer4"				Color="36,50,62,255" InnerPadding="2,2">
-					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_BONUSES" TruncateWidth="100" TruncatedTooltip="1"/>
+				<Grid			ID="BonusGrid"													Offset="510,10"	Size="parent-515,40"				Style="SubContainer4"				Color="36,50,62,255" InnerPadding="2,2">
+					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_BONUSES" />
 					<Stack	ID="BonusResources"				Anchor="L,C"	Offset="150,0"	WrapWidth="340"	WrapGrowth="Down"	StackGrowth="Right" />
 				</Grid>
 				<Grid			ID="LuxuryGrid"													Offset="5,55"		Size="parent-10,40"					Style="SubContainer4"				Color="36,50,62,255" InnerPadding="2,2">
-					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_LUXURIES" TruncateWidth="100" TruncatedTooltip="1"/>
+					<Label																					Offset="5,0"																Style="ReportResourceText"	String="LOC_HUD_REPORTS_LUXURIES" />
 					<Stack	ID="LuxuryResources"			Anchor="L,C"	Offset="150,0"	WrapWidth="840"	WrapGrowth="Down"	StackGrowth="Right" />
 				</Grid>
 			</Image>
@@ -274,9 +275,10 @@
 		<Container			ID="Top"														Offset="0,0"	Size="1003,20" >			
 			<Stack	StackGrowth="Right" >
 				<Box																													Size="2,parent"	Color="46,70,95,128" />
-				<Container																			Offset="1,0"	Size="232,parent" >
-          <Label		ID="LineItemName"			Style="ReportRowStart"			String="District" Offset="36,0" />
-          <Image	  ID="DistrictIcon" Size="16,16" Anchor="L,C" Offset="16,-1" Texture="Controls_GradientSmall" Hidden="1" />
+				<Container																			Offset="1,0"	Size="232,parent">
+          <Label		ID="LineItemName"			Style="ReportRowStart"			String="District" Offset="36,0" >
+            <Image	ID="DistrictIcon" Size="16,16" Anchor="L,C" Offset="-21,-1" Texture="Controls_GradientSmall" Hidden="1" />
+          </Label>
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="33,parent" />
@@ -347,7 +349,7 @@
 					<Image		Size="parent,24" Offset="0,-2" Texture="Controls_GradientSmall" FlipY="1" Color="Tourism,150" />
 					<Label		ID="Tourism"												Style="ReportHeaderText"		String="[ICON_Tourism]0" Color="Tourism"  />
 				</Container>
-				<Box																						Offset="1,0"	Size="2,22"	Color="46,70,95,128" />
+				<Box																						Offset="1,0"	Size="2,22"	Color="46,70,95,128" />				
 			</Stack>
 			<Grid					Style="DividerGrid" Offset="-10,22" Size="parent,8" Color="47,63,76,255" />
 		</Container>
@@ -632,133 +634,29 @@
 
 	<!-- Resource-->
 	<Instance					Name="ResourceAmountInstance">
-      <Label					ID="Info" Anchor="L,T" Style="ReportResourceText" String="00" />
+      <Label					ID="Info" Style="ReportResourceText" String="00" />
 	</Instance>
 
-  <!-- GOSSIP -->
-  <Instance					Name="GossipHeaderInstance">
-    <Container			ID="Top"														Offset="8,0" Size="994,22">
-      <Image																						Offset="4,0"	Size="parent-6,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
-      <Stack	StackGrowth="Right" >
-        <Box																													Size="2,parent"	Color="46,70,95,128" />
-        <Container																			Offset="1,0"	Size="79,parent">
-          <Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_DATE" />
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																										Size="55,parent">
-          <Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_GOSSIP_TYPE" />
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																										Size="55,parent">
-          <Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_LEADER" />
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																										Size="parent-210,parent">
-          <Label													Style="ReportHeaderSmallText"		String="LOC_REPORTS_NOTIFICATION_DESCRIPTION" />
-        </Container>
-        <Box																													Offset="11,0" Size="2,parent"	Color="46,70,95,255" />
-      </Stack>
-    </Container>
-  </Instance>
-
-  <Instance					Name="GossipEntryInstance">
-    <Container			ID="Top"														Offset="8,0" Size="994,62">
-      <Image																						Offset="4,0"	Size="parent-6,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
-      <Stack	StackGrowth="Right" >
-        <Box																													Size="2,parent"	Color="46,70,95,128" />
-        <Container																			Offset="1,0"	Size="79,parent">
-          <Label				ID="Date"																	Style="ReportValueText"	String="$Name$" />
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																										Size="55,55">
-          <Image				ID="Icon"																	    Size="48,48" Offset="0,6" Anchor="C,C" />
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																										Size="55,55">
-          <MakeInstance Name="LeaderIcon45"                           ID="Leader" Offset="0,6" Anchor="C,C" />	
-        </Container>
-        <Box																													Size="2,parent"	Color="46,70,95,255" />
-        <Container																								    Size="parent-210,parent">
-          <Label				ID="Description"															Style="ReportValueText"	String="$Description$" WrapWidth="400"/>
-        </Container>
-        <Box																													Offset="11,0" Size="2,parent"	Color="46,70,95,255" />
-      </Stack>
-    </Container>
-  </Instance>
-
-  <Instance					Name="GossipFilterInstance">
-    <Container			ID="Top"														Offset="8,0" Size="994,69">
-      <Image																						Offset="4,0"	Size="parent-6,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
-      <Stack	StackGrowth="Right" >
-        <Box																													Size="2,parent"	Color="46,70,95,128" />
-        <Container																			Offset="1,5"	Size="268,parent">
-          <PullDown ID="PlayerFilter" Offset="0,0" Size="268,62" AutoFlip="1" AutoSizePopup="1" ScrollThreshold="375" SpaceForScroll="0">
-            <ButtonData>
-              <GridButton  Size="325,62" Style="TabFont" TextAnchor="L,C" TextOffset="110,0" WrapWidth="200">
-                <Container Size="auto,auto" Anchor="L,C" Offset="10,-1">
-                  <MakeInstance Anchor="L,C" ID="LeaderIcon" Name="LeaderIcon45"/>
-                </Container>
-                <GridData Texture="Reports_DropDownControlLarge" StateOffsetIncrement="0,45"	SliceCorner="10,15" SliceTextureSize="45,45" />
-              </GridButton>
-            </ButtonData>
-            <GridData Offset="0,56" Texture="Controls_DropdownPanel" InnerPadding="3,6" SliceCorner="10,10" SliceTextureSize="22,22"/>
-            <ScrollPanelData Anchor="C,C" Vertical="1" Size="parent,parent" AutoScrollBar="1" >
-              <ScrollBar Style="Slider_Blue" Anchor="R,C" AnchorSide="I,I"   />
-            </ScrollPanelData>
-            <StackData StackGrowth="Bottom" Anchor="L,T"/>
-            <InstanceData Name="InstanceOne">
-              <GridButton ID="Button" Size="536,62" Texture="Reports_ButtonControl" SliceCorner="12,6" SliceTextureSize="45,24"  StateOffsetIncrement="0,24" Style="TabFont" Anchor="L,T" FontStyle="glow">
-                <Container Size="auto,auto" Anchor="L,C" Offset="10,-1">
-                  <MakeInstance Anchor="L,C" ID="LeaderIcon" Name="LeaderIcon45"/>
-                </Container>
-              </GridButton>
-            </InstanceData>
-          </PullDown>
-        </Container>
-        <Container																			Offset="1,5"	Size="268,parent">
-          <PullDown ID="GroupFilter" Offset="0,0" AutoFlip="1" ScrollThreshold="375" Size="268,62" SpaceForScroll="0" AutoSizePopup="1">
-            <ButtonData>
-              <GridButton Size="325,62" Style="FontNormal14" FontStyle="glow" Color0="208,212,217,255" Color1="16,43,67,100">
-                <GridData Texture="Reports_DropDownControlLarge" StateOffsetIncrement="0,45"	SliceCorner="10,15" SliceTextureSize="45,45" />
-              </GridButton>
-            </ButtonData>
-            <GridData Offset="0,56" Texture="Controls_DropdownPanel" InnerPadding="3,6" SliceCorner="10,10" SliceTextureSize="22,22"/>
-            <ScrollPanelData Anchor="C,C" Vertical="1" Size="parent,550" AutoScrollBar="1" >
-              <ScrollBar Style="Slider_Blue" Anchor="R,C" AnchorSide="I,I"   />
-            </ScrollPanelData>
-            <StackData StackGrowth="Bottom" Anchor="L,T"/>
-            <InstanceData Name="InstanceOne">
-              <GridButton ID="Button" Size="536,62" Texture="Reports_ButtonControl" SliceCorner="12,6" SliceTextureSize="45,24"  StateOffsetIncrement="0,24" Style="FontNormal14" FontStyle="glow" Color0="208,212,217,255"	String="LOC_HUD_REPORTS_FILTER_ALL" Color1="16,43,67,100"/>
-            </InstanceData>
-          </PullDown>
-        </Container>
-      </Stack>
-      <Box																													Offset="-1,0" Anchor="R,C" Size="2,parent"	Color="46,70,95,255"/>
-    </Container>
-  </Instance>
 
 
-  <!-- CITY STATUS -->
+
+	<!-- CITY STATUS -->
 
 	<Instance					Name="CityStatusHeaderInstance">
 		<Container			ID="Top"														Offset="8,0" Size="1003,22">
-			<Image																						Offset="4,0"	Size="parent-6,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
+			<Image																						Offset="4,0"	Size="parent-15,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
 			<Stack	StackGrowth="Right" >
 				<Box																													Size="2,parent"	Color="46,70,95,128" />
 				<Container																			Offset="1,0"	Size="136,parent">
 					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_CITY" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="80,parent">
-					<Label													Style="ReportHeaderSmallText"		String="LOC_REPORTS_GOVERNOR" />
-				</Container>
-				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="95,parent">
-					<Label													Style="ReportHeaderSmallText"		String="LOC_REPORTS_LOYALTY" />
-				</Container>
-				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="92,parent">
+				<Container																										Size="100,parent">
 					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_POPULATION" />
+				</Container>
+				<Box																													Size="2,parent"	Color="46,70,95,255" />
+				<Container																										Size="80,parent">
+					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_HOUSING" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="120,parent">
@@ -777,6 +675,10 @@
 					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_WAR_WEARINESS" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
+				<Container																										Size="80,parent">
+					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_STATUS" />
+				</Container>
+				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="78,parent">
 					<Label													Style="ReportHeaderSmallText"		String="LOC_HUD_REPORTS_HEADER_STRENGTH" />
 				</Container>
@@ -791,23 +693,19 @@
 
 	<Instance					Name="CityStatusEntryInstance">
 		<Container			ID="Top"														Offset="8,0" Size="1003,22">
-			<Image																						Offset="4,0"	Size="parent-6,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
+			<Image																						Offset="4,0"	Size="parent-15,parent" Texture="Controls_GradientSmall" FlipY="1" Color="39,89,137,125" />
 			<Stack	StackGrowth="Right" >
 				<Box																													Size="2,parent"	Color="46,70,95,128" />
 				<Container																			Offset="1,0"	Size="136,parent">
 					<Label				ID="CityName"																	Style="ReportValueText"	String="$CityName$" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="80,parent">
-					<Label				ID="Governor"																	Style="ReportValueText"	String="$Housing$" />
-				</Container>
-				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="95,parent">
-					<Label				ID="Loyalty"																		Style="ReportValueText"	String="$Status$" />
-				</Container>
-				<Box																													Size="2,parent"	Color="46,70,95,255" />
-				<Container																										Size="92,parent">
+				<Container																										Size="100,parent">
 					<Label				ID="Population"																Style="ReportValueText"	String="$Population$" />
+				</Container>
+				<Box																													Size="2,parent"	Color="46,70,95,255" />
+				<Container																										Size="80,parent">
+					<Label				ID="Housing"																	Style="ReportValueText"	String="$Housing$" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="120,parent">
@@ -824,6 +722,10 @@
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="110,parent">
 					<Label				ID="WarWeariness"															Style="ReportValueText"	String="$WarWeariness$" />
+				</Container>
+				<Box																													Size="2,parent"	Color="46,70,95,255" />
+				<Container																										Size="80,parent">
+					<Label				ID="Status"																		Style="ReportValueText"	String="$Status$" />
 				</Container>
 				<Box																													Size="2,parent"	Color="46,70,95,255" />
 				<Container																										Size="78,parent">
