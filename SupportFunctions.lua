@@ -109,85 +109,6 @@ function TruncateStringByLength( textString, textLen )
 	return textString;
 end
 
-function GetGreatWorksForCity(pCity:table)
-	local result:table = {};
-	if pCity then
-		local pCityBldgs:table = pCity:GetBuildings();
-		for buildingInfo in GameInfo.Buildings() do
-			local buildingIndex:number = buildingInfo.Index;
-			local buildingType:string = buildingInfo.BuildingType;
-			if(pCityBldgs:HasBuilding(buildingIndex)) then
-				local numSlots:number = pCityBldgs:GetNumGreatWorkSlots(buildingIndex);
-				if (numSlots ~= nil and numSlots > 0) then
-					local greatWorksInBuilding:table = {};
-
-					-- populate great works
-					for index:number=0, numSlots - 1 do
-						local greatWorkIndex:number = pCityBldgs:GetGreatWorkInSlot(buildingIndex, index);
-						if greatWorkIndex ~= -1 then
-							local greatWorkType:number = pCityBldgs:GetGreatWorkTypeFromIndex(greatWorkIndex);
-							table.insert(greatWorksInBuilding, GameInfo.GreatWorks[greatWorkType]);
-						end
-					end
-
-					-- create association between building type and great works
-					if #greatWorksInBuilding > 0 then
-						result[buildingType] = greatWorksInBuilding;
-					end
-				end
-			end
-		end
-	end
-	return result;
-end
-
--- ===========================================================================
--- Convert a set of values (red, green, blue, alpha) into a single hex value.
--- Values are from 0.0 to 1.0
--- return math.floor(value is a single, unsigned uint as ABGR
--- ===========================================================================
-function RGBAValuesToABGRHex( red, green, blue, alpha )
-
-	-- optionally pass in alpha, to taste
-	if alpha==nil then
-		alpha = 1.0;
-	end
-
-	-- prepare ingredients so they are clamped from 0 to 255
-	red 	= math.max( 0, math.min( 255, red*255 ));
-	green 	= math.max( 0, math.min( 255, green*255 ));
-	blue	= math.max( 0, math.min( 255, blue*255 ));
-	alpha	= math.max( 0, math.min( 255, alpha*255 ));
-
-	-- combine the ingredients, stiring gently
-	local value = lshift( alpha, 24 ) + lshift( blue, 16 ) + lshift( green, 8 ) + red;
-
-	-- return the baked goodness
-	return math.floor(value);
-end
-
--- ===========================================================================
---	Use to convert from CivBE style colors to ForgeUI color
--- ===========================================================================
-function RGBAObjectToABGRHex( colorObject )
-	return RGBAValuesToABGRHex( colorObject.x, colorObject.y, colorObject.z, colorObject.w );
-end
-
--- ===========================================================================
---	Guess what, TextControls still use legacy color; use to convert to it.
---	RETURNS: Object with R G B A to a vector like format with fields X Y Z W 
--- ===========================================================================
-function ABGRHExToRGBAObject( hexColor )
-	local ret = {};
-	ret.w = math.floor( math.fmod( rshift(hexColor,24), 256)); 
-	ret.z = math.floor( math.fmod( rshift(hexColor,16), 256));
-	ret.y = math.floor( math.fmod( rshift(hexColor,8), 256));
-	ret.x = math.floor( math.fmod( hexColor, 0x256 ));	-- lower MODs are messed up due what is in higher bits, need an AND!
-	return ret;
-end
-
-
-
 -- ===========================================================================
 -- Support for shifts
 -- ===========================================================================
@@ -381,6 +302,20 @@ function RemoveTableEntry( T:table, key:string, theValue )
 end
 
 -- ===========================================================================
+--	LUA Helper function
+-- ===========================================================================
+-- Using Fisher-Yates algorithm
+function ShuffleTable(tbl : table)
+	if table == nil then return nil end;
+	local size = #tbl;
+	for i = size, 1, -1 do
+		local rand = Game.GetRandNum(size, "Support: Shuffle Table") + 1;
+		tbl[i], tbl[rand] = tbl[rand], tbl[i]
+	end
+	return tbl;
+end
+
+-- ===========================================================================
 --	orderedPairs()
 --	Allows an ordered iteratation of the pairs in a table.  Use like pairs().
 --	Original version from: http://lua-users.org/wiki/SortedIteration
@@ -469,6 +404,17 @@ function Clamp( value:number, min:number, max:number )
 	end
 end
 
+-- ===========================================================================
+--	SoftRound()
+--	Rounds the passed in parameter with no decimal places.
+-- ===========================================================================
+function SoftRound(x)
+	if(x >= 0) then
+		return math.floor(x+0.5);
+	else
+		return math.ceil(x-0.5);
+	end
+end
 
 
 -- ===========================================================================
@@ -479,6 +425,32 @@ end
 function Round(num:number, idp:number)
   local mult:number = 10^(idp or 0);
   return math.floor(num * mult + 0.5) / mult;
+end
+
+
+-- ===========================================================================
+--	RandRange()
+--	Returns a value between min and max (inclusive) using gamecore synced RNG.
+-- ===========================================================================
+function RandRange(min:number, max:number, logString:string)
+	logString = logString or "Support: Rand Range";
+	if (Game.GetRandNum ~= nil) then
+		return Game.GetRandNum(max - min, logString) + min;
+	else
+		return min;
+	end
+end
+
+-- ===========================================================================
+--	Triangular()
+--	Returns the triangular number for n.
+-- ===========================================================================
+function Triangular(iN : number)
+	-- Pos only
+	iN = math.abs(iN);
+	-- Whole numbers only
+	iN = Round(iN);
+	return iN * (iN + 1) / 2;
 end
 
 
@@ -500,74 +472,6 @@ function PolarToRatioCartesian( r:number, phi:number, ratio:number )
 end
 
 -- ===========================================================================
---	Transforms a ABGR color by some amount
---	ARGS:	hexColor	Hex color value (0xAAGGBBRR)
---			amt			(0-255) the amount to darken or lighten the color
---			alpha		???
---RETURNS:	transformed color (0xAAGGBBRR)
--- ===========================================================================
-function DarkenLightenColor( hexColor:number, amt:number, alpha:number )
-
-	--Parse the a,g,b,r hex values from the string
-	local hexString :string = string.format("%x",hexColor);
-	local b = string.sub(hexString,3,4);
-	local g = string.sub(hexString,5,6);
-	local r = string.sub(hexString,7,8);
-	b = tonumber(b,16);
-	g = tonumber(g,16);
-	r = tonumber(r,16);
-
-	if (b == nil) then b = 0; end
-	if (g == nil) then g = 0; end
-	if (r == nil) then r = 0; end
-
-	local a = string.format("%x",alpha);
-	if (string.len(a)==1) then
-			a = "0"..a;
-	end
-
-	b = b + amt;
-	if (b < 0 or b == 0) then
-		b = "00";
-	elseif (b > 255 or b == 255) then
-		b = "FF";
-	else
-		b = string.format("%x",b);
-		if (string.len(b)==1) then
-			b = "0"..b;
-		end
-	end
-
-	g = g + amt;
-	if (g < 0 or g == 0) then
-		g = "00";
-	elseif (g > 255 or g == 255) then
-		g = "FF";
-	else
-		g = string.format("%x",g);
-		if (string.len(g)==1) then
-			g = "0"..g;
-		end
-	end
-
-	r = r + amt;
-	if (r < 0 or r == 0) then
-		r = "00";
-	elseif (r > 255 or r == 255) then
-		r = "FF";
-	else
-		r = string.format("%x",r);
-		if (string.len(r)==1) then
-			r = "0"..r;
-		end
-	end
-
-	hexString = a..b..g..r; 
-	return tonumber(hexString,16);
-end
-
-
--- ===========================================================================
 --	Recursively duplicate (deep copy)
 --	Original from: http://lua-users.org/wiki/CopyTable
 -- ===========================================================================
@@ -587,22 +491,60 @@ function DeepCopy( orig )
 end
 
 -- ===========================================================================
---	Sizes a control to fit a maximum height, while maintaining the aspect ratio
---	of the original control. If no Y is specified, we will use the height of the screen.
---	ARG 1: control (table) - expects a control to be resized
---	ARG 5: OPTIONAL maxY (number) - the minimum height of the control.  
+--	Recursively compare two tables (ignoring metatable)
+--  Original from: https://stackoverflow.com/questions/25922437/how-can-i-deep-compare-2-lua-tables-which-may-or-may-not-have-tables-as-keys
+--	ARGS:	table1		table one
+--			table2		table two
+--	RETURNS:	true if tables have the same content, false otherwise
 -- ===========================================================================
-function UniformToFillY( control:table, maxY:number )
-	local currentX = control:GetSizeX();
-	local currentY = control:GetSizeY();
-	local newX = 0;
-	local newY = 0;
-	if (maxY == nil) then
-		local _, screenY:number = UIManager:GetScreenSizeVal();
-		newY = screenY;
-	else
-		newY = maxY;
-	end
-	newX = (currentX * newY)/currentY;
-	control:SetSizeVal(newX,newY);
+function DeepCompare( table1, table2 )
+   local avoid_loops = {}
+
+   local function recurse(t1, t2)      
+	  -- Compare value types
+      if type(t1) ~= type(t2) then return false; end
+      
+	  -- Compare simple values
+      if type(t1) ~= "table" then return (t1 == t2); end
+      
+      -- First, let's avoid looping forever.
+      if avoid_loops[t1] then return avoid_loops[t1] == t2; end
+      avoid_loops[t1] = t2;
+
+      -- Copy keys from t2
+      local t2keys = {}
+      local t2tablekeys = {}
+      for k, _ in pairs(t2) do
+         if type(k) == "table" then table.insert(t2tablekeys, k); end
+         t2keys[k] = true;
+      end
+
+      -- Iterate keys from t1
+      for k1, v1 in pairs(t1) do
+         local v2 = t2[k1]
+         if type(k1) == "table" then
+            -- if key is a table, we need to find an equivalent one.
+            local ok = false
+            for i, tk in ipairs(t2tablekeys) do
+               if DeepCompare(k1, tk) and recurse(v1, t2[tk]) then
+                  table.remove(t2tablekeys, i)
+                  t2keys[tk] = nil
+                  ok = true
+                  break;
+               end
+            end
+            if not ok then return false; end
+         else
+            -- t1 has a key which t2 doesn't have, fail.
+            if v2 == nil then return false; end
+            t2keys[k1] = nil
+            if not recurse(v1, v2) then return false; end
+         end
+      end
+      -- if t2 has a key which t1 doesn't have, fail.
+      if next(t2keys) then return false; end
+      return true;
+   end
+
+   return recurse(table1, table2);
 end

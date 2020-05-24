@@ -6,10 +6,16 @@ include("InstanceManager");
 include("SupportFunctions");
 include("TabSupport");
 
--- ===========================================================================
---	DATA MEMBERS
--- ===========================================================================
 
+-- ===========================================================================
+--	CONSTANTS
+-- ===========================================================================
+local RELOAD_CACHE_ID = "WorldBuilderPlayerEditor";
+
+
+-- ===========================================================================
+--	MEMBERS
+-- ===========================================================================
 local DATA_FIELD_SELECTION						:string = "Selection";
 
 local m_SelectedPlayer = nil;
@@ -41,6 +47,37 @@ local m_selectedPlayerEntry :table = nil;
 -- ===========================================================================
 
 -- ===========================================================================
+function PlacementSetResults(bStatus: boolean, sStatus: table, name: string)
+	local result : string;
+
+	if bStatus then
+		UI.PlaySound("UI_WB_Placement_Succeeded");
+		result = Locale.Lookup(name) .. " " .. Locale.Lookup("LOC_WORLDBUILDER_BLANK_PLACEMENT_OK");
+	else
+		if sStatus.NeededDistrict ~= -1 then
+			result = Locale.Lookup("LOC_WORLDBUILDER_CREATE_DISTRICT", m_DistrictEntries[sStatus.NeededDistrict+1].Text);
+		elseif sStatus.NeededPopulation > 0 then
+			result = Locale.Lookup("LOC_WORLDBUILDER_DISTRICT_REQUIRES") .. " " .. sStatus.NeededPopulation .. " " .. Locale.Lookup("LOC_WORLDBUILDER_POPULATION");
+		elseif sStatus.bInProgress then
+			result=Locale.Lookup("LOC_WORLDBUILDER_IN_PROGRESS");
+		elseif sStatus.AlreadyExists then
+			result=Locale.Lookup("LOC_WORLDBUILDER_ALREADY_EXISTS");
+		elseif sStatus.IsOccupied then
+			result=Locale.Lookup("LOC_WORLDBUILDER_OCCUPIED_BY_ENEMY");
+		elseif sStatus.DistrictIsPillaged then
+			result=Locale.Lookup("LOC_WORLDBUILDER_IS_PILLAGED");
+		elseif sStatus.LocationIsContaminated then
+			result=Locale.Lookup("LOC_WORLDBUILDER_IS_CONTAMINATED");
+		else
+			result=Locale.Lookup("LOC_WORLDBUILDER_FAILURE_UNKNOWN");
+		end
+		UI.PlaySound("UI_WB_Placement_Failed");
+	end
+
+	LuaEvents.WorldBuilder_SetPlacementStatus(result);
+end
+
+-- ===========================================================================
 --
 -- ===========================================================================
 function AddTabSection( tabs:table, name:string, populateCallback:ifunction, parent )
@@ -67,7 +104,7 @@ function AddTabSection( tabs:table, name:string, populateCallback:ifunction, par
 	end
 
 	kTab.Button:GetTextControl():SetText( Locale.ToUpper(name) );
-	kTab.Button:SetSizeToText( 2, 20 );
+	kTab.Button:SetSizeToText( 30, 20 );
     kTab.Button:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
 
 	tabs.AddTab( kTab.Button, callback );
@@ -236,6 +273,19 @@ function GetCivLevelEntryIndexByType(civLevelType)
 end
 
 -- ===========================================================================
+--	Get the index of the Civ's era that matches the type.
+-- ===========================================================================
+function GetCivEraIndexByType(civEraType)
+	for i, civEraEntry in ipairs(m_EraEntries) do
+		if civEraEntry ~= nil and civEraEntry.Type == civEraType then
+			return i;
+		end
+	end
+
+	return 1;
+end
+
+-- ===========================================================================
 function UpdateTechTabValues()
 
 	if m_SelectedPlayer ~= nil then
@@ -327,11 +377,11 @@ function UpdatePlayerEntry(playerEntry)
 	end
 
 	playerEntry.Config = playerConfig;
-	playerEntry.Leader = playerConfig.Leader ~= nil and playerConfig.Leader or "UNDEFINED";
-	playerEntry.Civ    = playerConfig.Civ ~= nil and playerConfig.Civ or "UNDEFINED";
-	playerEntry.CivLevel = playerConfig.CivLevel ~= nil and playerConfig.CivLevel or "UNDEFINED";
-	playerEntry.Era    = GameInfo.Eras[ playerConfig.Era ] ~= nil and GameInfo.Eras[ playerConfig.Era ].Index or 0;
-	playerEntry.Text   = string.format("%s - %s", playerConfig.IsHuman and "Human" or "AI", Locale.Lookup(playerConfig.Name));
+	playerEntry.Leader = playerConfig.Leader ~= nil and playerConfig.Leader or Locale.Lookup("LOC_WORLDBUILDER_UNDEFINED");
+	playerEntry.Civ    = playerConfig.Civ ~= nil and playerConfig.Civ or Locale.Lookup("LOC_WORLDBUILDER_UNDEFINED");
+	playerEntry.CivLevel = playerConfig.CivLevel ~= nil and playerConfig.CivLevel or Locale.Lookup("LOC_WORLDBUILDER_UNDEFINED");
+	playerEntry.Era    = playerConfig.Era ~= nil and playerConfig.Era or Locale.Lookup("LOC_WORLDBUILDER_DEFAULT");
+	playerEntry.Text   = string.format("%s - %s", playerConfig.IsHuman and Locale.Lookup("LOC_WORLDBUILDER_HUMAN") or Locale.Lookup("LOC_WORLDBUILDER_AI"), Locale.Lookup(playerConfig.Name));
 	playerEntry.Gold   = playerConfig.Gold;
 	playerEntry.Faith  = playerConfig.Faith;
 	playerEntry.IsFullCiv = playerConfig.IsFullCiv;
@@ -346,9 +396,23 @@ function UpdatePlayerEntry(playerEntry)
 
 	-- Update icon if we're a specific civ
 	if playerEntry.Civ ~= "UNDEFINED" and playerEntry.Civ ~= "RANDOM" then
-		playerEntry.playerInstance.CivIcon:SetIcon("ICON_" .. playerConfig.Name);
-	
-		local backColor, frontColor = UI.GetPlayerColors(playerEntry.Index);
+		playerEntry.playerInstance.CivIcon:SetIcon("ICON_" .. playerConfig.Civ);
+
+		local colorLeader : string = nil;
+		for i, leader in ipairs(m_LeaderEntries) do
+			if playerEntry.Civ == leader.CivType then
+				colorLeader = leader.Type;
+				break;
+			end
+		end
+
+		local backColor : number;
+		local frontColor : number;
+		if colorLeader ~= nil then
+			backColor, frontColor = UI.GetPlayerColorValues(colorLeader, 0);
+		else
+			backColor, frontColor = UI.GetPlayerColorValues(playerEntry.Leader, 0);
+		end
 		playerEntry.playerInstance.CivIcon:SetColor(frontColor);
 		playerEntry.playerInstance.CivIconBacking:SetColor(backColor);
 	else
@@ -377,20 +441,21 @@ function UpdatePlayerList()
 	local selected = 1;
 	local entryCount = 0;
 
-	local iMaxPlayers = WorldBuilder.PlayerManager():GetMaxPlayers() - 1;	-- -1, for a Lua loop
-	for i = 0, iMaxPlayers do
-
+	for i = 0, GameDefines.MAX_PLAYERS-1 do 
 		local eStatus = WorldBuilder.PlayerManager():GetSlotStatus(i); 
 		if eStatus ~= SlotStatus.SS_CLOSED then
-			local playerEntry = {};
-			playerEntry.Index = i;
-			UpdatePlayerEntry(playerEntry);
-			table.insert(m_PlayerEntries, playerEntry);
-			m_PlayerIndexToEntry[i] = playerEntry;
-			entryCount = entryCount + 1;
+			local playerConfig = WorldBuilder.PlayerManager():GetPlayerConfig(i);
+			if playerConfig.IsBarbarian == false then	-- Skipping the Barbarian player
+				local playerEntry = {};
+				playerEntry.Index = i;
+				UpdatePlayerEntry(playerEntry);
+				table.insert(m_PlayerEntries, playerEntry);
+				m_PlayerIndexToEntry[i] = playerEntry;
+				entryCount = entryCount + 1;
 
-			if m_SelectedPlayer ~= nil and m_SelectedPlayer.Index == playerEntry.Index then
-				selected = entryCount;
+				if m_SelectedPlayer ~= nil and m_SelectedPlayer.Index == playerEntry.Index then
+					selected = entryCount;
+				end
 			end
 		end
 	end
@@ -407,7 +472,7 @@ function GetSelectedCity()
 
 	if m_SelectedPlayer ~= nil then
 		if (m_ViewingTab.SelectedCityID ~= nil) then
-			return CityManager.GetCity(m_SelectedPlayer.Index, m_ViewingTab.SelectedCityID);
+			return WorldBuilder.CityManager():GetCity(m_SelectedPlayer.Index, m_ViewingTab.SelectedCityID);
 		end			
 	end
 
@@ -480,7 +545,9 @@ function InitGeneralTab()
 
 		-- Gold/Faith
 		m_ViewingTab.GeneralInstance.GoldEdit:RegisterStringChangedCallback( OnGoldEdited );
+		m_ViewingTab.GeneralInstance.GoldEdit:SetNumberInput(true);
 		m_ViewingTab.GeneralInstance.FaithEdit:RegisterStringChangedCallback( OnFaithEdited );
+		m_ViewingTab.GeneralInstance.FaithEdit:SetNumberInput(true);
 	end
 end
 
@@ -488,17 +555,29 @@ end
 function UpdateGeneralTabValues(entry:table)
 	if m_ViewingTab.GeneralInstance then
 		local playerSelected = m_SelectedPlayer ~= nil;
+		local playerInitialized = false;
+		if playerSelected then
+			playerInitialized = WorldBuilder.PlayerManager():IsPlayerInitialized(m_SelectedPlayer.Index);
+		end
+		local bIsBarb : boolean = false;
+
+		if m_SelectedPlayer ~= nil then
+			if m_SelectedPlayer.Civ == "CIVILIZATION_BARBARIAN" then
+				bIsBarb = true;
+			end
+		end
+
 		m_ViewingTab.GeneralInstance.CivPullDown:SetDisabled( not playerSelected );
-		m_ViewingTab.GeneralInstance.EraPullDown:SetDisabled( not playerSelected );
-		m_ViewingTab.GeneralInstance.GoldEdit:SetDisabled( not playerSelected );
-		m_ViewingTab.GeneralInstance.FaithEdit:SetDisabled( not playerSelected );
+		m_ViewingTab.GeneralInstance.EraPullDown:SetDisabled( not playerSelected or not playerInitialized );
+		m_ViewingTab.GeneralInstance.GoldEdit:SetDisabled( not playerSelected or not playerInitialized or bIsBarb);
+		m_ViewingTab.GeneralInstance.FaithEdit:SetDisabled( not playerSelected or not playerInitialized or bIsBarb);
 		m_ViewingTab.GeneralInstance.LeaderPullDown:SetDisabled( not playerSelected or not m_SelectedPlayer.IsFullCiv or m_SelectedPlayer.Civ == -1 );
 
 		if m_SelectedPlayer ~= nil then
 			m_ViewingTab.GeneralInstance.CivPullDown:SetSelectedIndex( GetCivEntryIndexByType( m_SelectedPlayer.Civ ), false );
 			m_ViewingTab.GeneralInstance.LeaderPullDown:SetSelectedIndex( GetLeaderEntryIndexByType( m_SelectedPlayer.Leader ), false );
 			m_ViewingTab.GeneralInstance.CivLevelPullDown:SetSelectedIndex( GetCivLevelEntryIndexByType( m_SelectedPlayer.CivLevel ), false );
-			m_ViewingTab.GeneralInstance.EraPullDown:SetSelectedIndex( m_SelectedPlayer.Era+1, false );
+			m_ViewingTab.GeneralInstance.EraPullDown:SetSelectedIndex( GetCivEraIndexByType( m_SelectedPlayer.Era ), false );
 
 			local goldText = m_ViewingTab.GeneralInstance.GoldEdit:GetText();
 			if goldText == nil or tonumber(goldText) ~= m_SelectedPlayer.Gold then
@@ -590,7 +669,7 @@ function UpdatePlayerCityGeneralPage()
 			m_ViewingTab.SubTab.CityGeneralInstance.PopulationEdit:SetDisabled(false);
 			local population = WorldBuilder.CityManager():GetCityValue(pCity, "Population");
 			if (population ~= nil) then
-				m_ViewingTab.SubTab.CityGeneralInstance.PopulationEdit:SetText(population);
+				m_ViewingTab.SubTab.CityGeneralInstance.PopulationEdit:SetText(tostring(population));
 			end
 
 			-- Update city name header
@@ -611,6 +690,7 @@ function ViewPlayerCityGeneralPage()
 	ContextPtr:BuildInstanceForControl( "CityGeneralInstance", m_ViewingTab.SubTab.CityGeneralInstance, m_ViewingTab.CitiesInstance.Stack ) ;	
 
 	m_ViewingTab.SubTab.CityGeneralInstance.PopulationEdit:RegisterStringChangedCallback( OnCityPopulationEdited );
+	m_ViewingTab.SubTab.CityGeneralInstance.PopulationEdit:SetNumberInput(true);
 
 	UpdatePlayerCityGeneralPage();
 	
@@ -638,8 +718,10 @@ function UpdateSelectedDistrictInfo()
 					local pDistrict = pCityDistricts:GetDistrict(ms_SelectDistrictTypeHash);
 					if pDistrict ~= nil then
 						m_ViewingTab.SubTab.CityDistrictsInstance.PillagedCheckbox:SetSelected(pDistrict:IsPillaged());
-						m_ViewingTab.SubTab.CityDistrictsInstance.GarrisonDamageEdit:SetText( tostring( pDistrict:GetDamage(DefenseTypes.DISTRICT_GARRISON) ) );
-						m_ViewingTab.SubTab.CityDistrictsInstance.OuterDamageEdit:SetText( tostring( pDistrict:GetDamage(DefenseTypes.DISTRICT_OUTER) ) );
+--						m_ViewingTab.SubTab.CityDistrictsInstance.GarrisonDamageEdit:SetText( tostring( pDistrict:GetDamage(DefenseTypes.DISTRICT_GARRISON) ) );
+--						m_ViewingTab.SubTab.CityDistrictsInstance.GarrisonDamageEdit:SetNumberInput(true);
+--						m_ViewingTab.SubTab.CityDistrictsInstance.OuterDamageEdit:SetText( tostring( pDistrict:GetDamage(DefenseTypes.DISTRICT_OUTER) ) );
+--						m_ViewingTab.SubTab.CityDistrictsInstance.OuterDamageEdit:SetNumberInput(true);
 						m_ViewingTab.SubTab.CityDistrictsInstance.SelectedDistrictName:SetText(Locale.Lookup(GameInfo.Districts[ms_SelectDistrictType].Name));
 						bEnable = true;
 					else
@@ -652,8 +734,8 @@ function UpdateSelectedDistrictInfo()
 	end
 
 	m_ViewingTab.SubTab.CityDistrictsInstance.PillagedCheckbox:SetEnabled(bEnable);
-	m_ViewingTab.SubTab.CityDistrictsInstance.GarrisonDamageEdit:SetEnabled(bEnable);
-	m_ViewingTab.SubTab.CityDistrictsInstance.OuterDamageEdit:SetEnabled(bEnable);
+--	m_ViewingTab.SubTab.CityDistrictsInstance.GarrisonDamageEdit:SetEnabled(bEnable);
+--	m_ViewingTab.SubTab.CityDistrictsInstance.OuterDamageEdit:SetEnabled(bEnable);
 end
 -- ===========================================================================
 function OnDistrictSelected(entry)
@@ -689,6 +771,8 @@ function OnDistrictEntryButton(control, entry)
 						kParams.CityID = pCity:GetID();
 
 						LuaEvents.WorldBuilderModeChangeRequest(WorldBuilderModes.PLACE_DISTRICTS, kParams);
+					else
+						LuaEvents.WorldBuilder_SetPlacementStatus(Locale.Lookup("LOC_WORLDBUILDER_CITY_NEEDED"));
 					end
 				end
 			end
@@ -823,9 +907,16 @@ function OnBuildingEntryButton(control, entry)
 
 			else
 				-- Just create it, it will go in its district.
-				if WorldBuilder.CityManager():CreateBuilding(pCity, entry.Type.BuildingType, 100) == false then
-					-- Failed.  Uncheck the box
-					control:SetCheck(false);
+                local pCity = GetSelectedCity();
+                if pCity ~= nil then
+					bStatus, sStatus = WorldBuilder.CityManager():CreateBuilding(pCity, entry.Type.BuildingType, 100);
+					PlacementSetResults(bStatus, sStatus, entry.Text);
+					if not bStatus then
+						 -- Failed.  Uncheck the box
+                        control:SetCheck(false);
+					end
+				else
+					LuaEvents.WorldBuilder_SetPlacementStatus(Locale.Lookup("LOC_WORLDBUILDER_CITY_NEEDED"));
 				end
 			end
 
@@ -989,13 +1080,12 @@ function ViewPlayerCitiesPage()
 		m_ViewingTab.CitiesInstance.CityList:SetEntrySelectedCallback( OnCitySelected );
 		m_ViewingTab.CitiesInstance.CityList:SetEntries( m_CityEntries, 0 );
 	
-		m_ViewingTab.m_subTabs = CreateTabs( m_ViewingTab.CitiesInstance.TabContainer, 42, 34, 0xFF331D05 );
+		m_ViewingTab.m_subTabs = CreateTabs( m_ViewingTab.CitiesInstance.TabContainer, 42, 34, UI.GetColorValueFromHexLiteral(0xFF331D05) );
 		AddTabSection( m_ViewingTab.m_subTabs, "LOC_WORLDBUILDER_TAB_GENERAL",		ViewPlayerCityGeneralPage, m_ViewingTab.CitiesInstance.TabContainer );
 		AddTabSection( m_ViewingTab.m_subTabs, "LOC_WORLDBUILDER_TAB_DISTRICTS",	ViewPlayerCityDistrictsPage, m_ViewingTab.CitiesInstance.TabContainer );
 		AddTabSection( m_ViewingTab.m_subTabs, "LOC_WORLDBUILDER_TAB_BUILDINGS",	ViewPlayerCityBuildingsPage, m_ViewingTab.CitiesInstance.TabContainer );
 		SetTabsDisabled( m_ViewingTab.m_subTabs, true );
 
-		m_ViewingTab.m_subTabs.SameSizedTabs(50);
 		m_ViewingTab.m_subTabs.CenterAlignTabs(-10);		
 
 		m_ViewingTab.CitiesInstance.Stack:CalculateSize();
@@ -1031,9 +1121,30 @@ function OnLoadGameViewStateDone()
 end
 
 -- ===========================================================================
-function OnClose()
+function KeyHandler( key:number )
+	if key == Keys.VK_ESCAPE and not ContextPtr:IsHidden() then
+		ContextPtr:SetHide(true);
+		LuaEvents.WorldBuilder_ShowPlayerEditor(false);
+		return true;
+	end
 
+	return false;
+end
+
+function OnInputHandler( pInputStruct:table )
+	local uiMsg = pInputStruct:GetMessageType();
+
+	if uiMsg == KeyEvents.KeyUp then 
+		return KeyHandler( pInputStruct:GetKey() ); 
+	end;
+
+	return false;
+end
+
+-- ===========================================================================
+function OnClose()
 	ContextPtr:SetHide(true);
+	LuaEvents.WorldBuilder_ShowPlayerEditor(false);
 end
 
 -- ===========================================================================
@@ -1044,16 +1155,29 @@ end
 
 -- ===========================================================================
 function OnPlayerRemoved(index)
-	
+
 	UpdatePlayerList();
 end
 
 -- ===========================================================================
 function OnPlayerEdited(index)
-
 	local playerEntry = m_PlayerIndexToEntry[index];
 	if playerEntry ~= nil then
+		for plotIndex = 0, Map.GetPlotCount()-1, 1 do
+			local plot = Map.GetPlotByIndex(plotIndex);
+			local owner = plot:GetOwner();
+
+			WorldBuilder.UnitManager():RemoveAt(plot);
+
+			if owner ~= nil and owner == playerEntry.Index then
+				WorldBuilder.MapManager():SetImprovementType( plot, -1 );
+				WorldBuilder.CityManager():RemoveAt(plot);
+			end
+		end
+
 		UpdatePlayerEntry(playerEntry);
+		UI.RefreshColorSet();
+		UI.RebuildColorDB();
 	end
 end
 
@@ -1143,7 +1267,7 @@ end
 function OnEraSelected(entry)
 
 	if m_SelectedPlayer ~= nil then
-		WorldBuilder.PlayerManager():SetPlayerEra(m_SelectedPlayer.Index, entry.Type.Index);
+		WorldBuilder.PlayerManager():SetPlayerEra(m_SelectedPlayer.Index, entry.Type);
 	end
 end
 
@@ -1240,6 +1364,24 @@ function OnCityRemovedFromMap()
 end
 
 -- ===========================================================================
+function OnShutdown()
+	LuaEvents.WorldBuilder_PlayerAddedRemove( OnPlayerAdded );
+	LuaEvents.WorldBuilder_PlayerRemovedRemove( OnPlayerRemoved );
+	LuaEvents.WorldBuilder_PlayerEditedRemove( OnPlayerEdited );
+	LuaEvents.WorldBuilder_PlayerTechEditedRemove( OnPlayerTechEdited );
+	LuaEvents.WorldBuilder_PlayerCivicEditedRemove( OnPlayerCivicEdited );
+	LuaEvents.WorldBuilder_ShowPlayerEditorRemove( OnShowPlayerEditor );
+	LuaEvents.WorldBuilder_ShowMapEditorRemove( OnShowMapEditor );
+
+	LuaEvents.GameDebug_AddValue(RELOAD_CACHE_ID, "IsVisible", ContextPtr:IsVisible());
+	LuaEvents.GameDebug_AddValue(RELOAD_CACHE_ID, "SelectedPlayer", m_SelectedPlayer);
+
+	if ContextPtr:IsVisible() then
+		Input.PopContext();
+	end
+end
+
+-- ===========================================================================
 --	Init
 -- ===========================================================================
 function OnInit()
@@ -1247,23 +1389,26 @@ function OnInit()
 	-- Title
 	Controls.ModalScreenTitle:SetText( Locale.ToUpper(Locale.Lookup("LOC_WORLD_BUILDER_PLAYER_EDITOR_TT")) );
 
+	ContextPtr:SetInputHandler( OnInputHandler, true );
+
 	-- EraPullDown
+	table.insert(m_EraEntries, { Text="LOC_WORLDBUILDER_DEFAULT", Type="DEFAULT" });
 	for type in GameInfo.Eras() do
-		table.insert(m_EraEntries, { Text=type.Name, Type=type });
+		table.insert(m_EraEntries, { Text=type.Name, Type=type.EraType });
 	end
 
 	-- CivLevelPullDown
 	for type in GameInfo.CivilizationLevels() do
 		local name = type.Name ~= nil and type.Name or type.CivilizationLevelType;
-		table.insert(m_CivLevelEntries, { Text=name, Type=type.CivilizationLevelType });
+		table.insert(m_CivLevelEntries, { Text="LOC_WORLDBUILDER_"..name, Type=type.CivilizationLevelType });
 	end
 
 	-- CivPullDown
-
+	
 	-- Intialize the m_CivEntries table.  This must use a simple index for the key, the pull down control will access it directly.
 	-- The first two entries are special
-	table.insert(m_CivEntries, { Text="Random", Type="RANDOM", DefaultLeader="RANDOM" });
-	table.insert(m_CivEntries, { Text="Any", Type="UNDEFINED", DefaultLeader="UNDEFINED" });
+	table.insert(m_CivEntries, { Text="LOC_WORLDBUILDER_RANDOM", Type="RANDOM", DefaultLeader="RANDOM" });
+	table.insert(m_CivEntries, { Text="LOC_WORLDBUILDER_ANY", Type="UNDEFINED", DefaultLeader="UNDEFINED" });
 	-- Fill in the civs
 	for type in GameInfo.Civilizations() do
 		table.insert(m_CivEntries, { Text=type.Name, Type=type.CivilizationType, DefaultLeader=-1 });
@@ -1279,10 +1424,16 @@ function OnInit()
 	end
 
 	-- LeaderPullDown
-	table.insert(m_LeaderEntries, { Text="Random", Type="RANDOM" });
-	table.insert(m_LeaderEntries, { Text="Any", Type="UNDEFINED" });
+	table.insert(m_LeaderEntries, { Text="LOC_WORLDBUILDER_RANDOM", Type="RANDOM" });
+	table.insert(m_LeaderEntries, { Text="LOC_WORLDBUILDER_ANY", Type="UNDEFINED" });
 	for type in GameInfo.Leaders() do
-		table.insert(m_LeaderEntries, { Text=type.Name, Type=type.LeaderType });
+		if type.Name ~= "LOC_EMPTY" then
+			if type.CivilizationCollection[1] ~= nil then
+				table.insert(m_LeaderEntries, { Text=type.Name, Type=type.LeaderType, CivType=type.CivilizationCollection[1].CivilizationType });
+			else
+				table.insert(m_LeaderEntries, { Text=type.Name, Type=type.LeaderType, CivType=nil });
+			end
+		end
 	end
 
 	-- TechList
@@ -1297,22 +1448,33 @@ function OnInit()
 
 	-- District list
 	for type in GameInfo.Districts() do
-		table.insert(m_DistrictEntries, { Text=type.Name, Type=type });
+		if type.DistrictType ~= "DISTRICT_WONDER" then
+			table.insert(m_DistrictEntries, { Text=type.Name, Type=type });
+		end
 	end
+	table.sort(m_DistrictEntries, function(a, b)
+		return Locale.Lookup(a.Type.Name) < Locale.Lookup(b.Type.Name);
+	end );
 
 	-- Building list
 	for type in GameInfo.Buildings() do
-		table.insert(m_BuildingEntries, { Text=type.Name, Type=type });
+		if type.RequiresPlacement ~= true then
+			if type.InternalOnly == nil or type.InternalOnly == false then
+				table.insert(m_BuildingEntries, { Text=type.Name, Type=type });
+			end
+		end
 	end
+	table.sort(m_BuildingEntries, function(a, b)
+		return Locale.Lookup(a.Type.Name) < Locale.Lookup(b.Type.Name);
+	end );
 
-	m_tabs = CreateTabs( Controls.TabContainer, 42, 34, 0xFF331D05 );
+	m_tabs = CreateTabs( Controls.TabContainer, 42, 34, UI.GetColorValueFromHexLiteral(0xFF331D05) );
 	AddTabSection( m_tabs, "LOC_WORLDBUILDER_TAB_GENERAL",		ViewPlayerGeneralPage, Controls.TabContainer );
 	AddTabSection( m_tabs, "LOC_WORLDBUILDER_TAB_TECHS",		ViewPlayerTechsPage, Controls.TabContainer );
 	AddTabSection( m_tabs, "LOC_WORLDBUILDER_TAB_CIVICS",		ViewPlayerCivicsPage, Controls.TabContainer );
 	AddTabSection( m_tabs, "LOC_WORLDBUILDER_TAB_CITIES",		ViewPlayerCitiesPage, Controls.TabContainer );
 	SetTabsDisabled(m_tabs, true);
 
-	m_tabs.SameSizedTabs(50);
 	m_tabs.CenterAlignTabs(-10);		
 
 	-- Add/Remove Players
@@ -1322,6 +1484,7 @@ function OnInit()
 
 	-- Register for events
 	ContextPtr:SetShowHandler( OnShow );
+	ContextPtr:SetShutdown( OnShutdown );
 	Events.LoadGameViewStateDone.Add( OnLoadGameViewStateDone );
 	Events.CityAddedToMap.Add( OnCityAddedToMap );
 	Events.CityRemovedFromMap.Add( OnCityRemovedFromMap );

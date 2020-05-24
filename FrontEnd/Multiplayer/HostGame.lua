@@ -15,6 +15,10 @@ include("Civ6Common");
 local LOC_GAME_SETUP		:string = Locale.Lookup("LOC_MULTIPLAYER_GAME_SETUP");
 local LOC_STAGING_ROOM		:string = Locale.ToUpper(Locale.Lookup("LOC_MULTIPLAYER_STAGING_ROOM"));
 local RELOAD_CACHE_ID		:string = "HostGame";
+
+local MIN_SCREEN_Y			:number = 768;
+local SCREEN_OFFSET_Y		:number = 20;
+local MIN_SCREEN_OFFSET_Y	:number = -93;
 --local SCROLL_SIZE_DEFAULT	:number = 620;
 --local SCROLL_SIZE_IN_SESSION:number = 662;
 
@@ -24,6 +28,31 @@ local RELOAD_CACHE_ID		:string = "HostGame";
 local m_lobbyModeName:string = MPLobbyTypes.STANDARD_INTERNET;
 local m_shellTabIM:table = InstanceManager:new("ShellTab", "TopControl", Controls.ShellTabs);
 local m_kPopupDialog:table;
+
+
+
+-- ===========================================================================
+-- Perform validation on setup parameters.
+-- ===========================================================================
+function UI_PostRefreshParameters()
+	-- Most of the options self-heal due to the setup parameter logic.
+	-- However, player options are allowed to be in an 'invalid' state for UI
+	-- This way, instead of hiding/preventing the user from selecting an invalid player
+	-- we can allow it, but display an error message explaining why it's invalid.
+
+	-- This is ily used to present ownership errors and custom constraint errors.
+	Controls.SaveConfigButton:SetDisabled(false);
+	Controls.ConfirmButton:SetDisabled(false);
+	Controls.ConfirmButton:SetToolTipString(nil);
+
+	local game_err = GetGameParametersError();
+	if(game_err) then
+		Controls.SaveConfigButton:SetDisabled(true);
+		Controls.ConfirmButton:SetDisabled(true);
+		Controls.ConfirmButton:LocalizeAndSetToolTip("LOC_SETUP_PARAMETER_ERROR");
+
+	end
+end
 
 -- ===========================================================================
 --	Input Handler
@@ -51,6 +80,7 @@ function OnShow()
 	Controls.ConfirmButton:SetHide(isInSession);
 	
 	ShowDefaultButton();
+	ShowLoadConfigButton();
 	Controls.LoadButton:SetHide(not GameConfiguration.IsHotseat() or isInSession);
 
 	--[[
@@ -69,6 +99,13 @@ function ShowDefaultButton()
 								and not Network.IsInSession();
 
 	Controls.DefaultButton:SetHide(not showDefaultButton);
+end
+
+function ShowLoadConfigButton()
+	local showLoadConfig = not GameConfiguration.IsSavedGame()
+								and not Network.IsInSession();
+
+	Controls.LoadConfigButton:SetHide(not showLoadConfig);
 end
 
 -- ===========================================================================
@@ -138,6 +175,26 @@ function OnConfirmClick()
 	Network.HostGame(serverType);	
 end
 
+-------------------------------------------------
+-- Load Configuration Button Handler
+-------------------------------------------------
+function OnLoadConfig()
+	local serverType = ServerTypeForMPLobbyType(m_lobbyModeName);
+	LuaEvents.HostGame_SetLoadGameServerType(serverType);
+	local kParameters = {};
+	kParameters.FileType = SaveFileTypes.GAME_CONFIGURATION;
+	UIManager:QueuePopup(Controls.LoadGameMenu, PopupPriority.Current, kParameters);
+end
+
+-------------------------------------------------
+-- Load Configuration Button Handler
+-------------------------------------------------
+function OnSaveConfig()
+	local kParameters = {};
+	kParameters.FileType = SaveFileTypes.GAME_CONFIGURATION;
+	UIManager:QueuePopup(Controls.SaveGameMenu, PopupPriority.Current, kParameters);
+end
+
 function OnAbandoned(eReason)
 	if (not ContextPtr:IsHidden()) then
 
@@ -158,6 +215,8 @@ function OnAbandoned(eReason)
 		elseif (eReason == KickReason.KICK_MOD_MISSING) then
 			local modMissingErrorStr = Modding.GetLastModErrorString();
 			LuaEvents.MultiplayerPopup( modMissingErrorStr, "LOC_GAME_ABANDONED_MOD_MISSING_TITLE" );
+		elseif (eReason == KickReason.KICK_MATCH_DELETED) then
+			LuaEvents.MultiplayerPopup( "LOC_GAME_ABANDONED_MATCH_DELETED", "LOC_GAME_ABANDONED_MATCH_DELETED_TITLE" );
 		else
 			LuaEvents.MultiplayerPopup( "LOC_GAME_ABANDONED_CONNECTION_LOST", "LOC_GAME_ABANDONED_CONNECTION_LOST_TITLE");
 		end
@@ -288,26 +347,32 @@ function LoadButtonClick()
 	UIManager:QueuePopup(Controls.LoadGameMenu, PopupPriority.Current);	
 end
 
+-- ===========================================================================
 function Resize()
 	local screenX, screenY:number = UIManager:GetScreenSizeVal();
-	local hideLogo = true;
-	if(screenY >= Controls.MainWindow:GetSizeY() + Controls.LogoContainer:GetSizeY()+ Controls.LogoContainer:GetOffsetY()) then
-		hideLogo = false;
+	if(screenY >= MIN_SCREEN_Y + (Controls.LogoContainer:GetSizeY()+ Controls.LogoContainer:GetOffsetY() * 2)) then
+		Controls.MainWindow:SetSizeY(screenY-(Controls.LogoContainer:GetSizeY() + Controls.LogoContainer:GetOffsetY() * 2));
+		Controls.DecoBorder:SetSizeY(SCREEN_OFFSET_Y + Controls.MainWindow:GetSizeY()-(Controls.BottomButtonStack:GetSizeY() + Controls.LogoContainer:GetSizeY()));
+	else
+		Controls.MainWindow:SetSizeY(screenY);
+		Controls.DecoBorder:SetSizeY(MIN_SCREEN_OFFSET_Y + Controls.MainWindow:GetSizeY()-(Controls.BottomButtonStack:GetSizeY()));
 	end
-	Controls.LogoContainer:SetHide(hideLogo);
 	Controls.MainGrid:ReprocessAnchoring();
 end
 
+-- ===========================================================================
 function OnUpdateUI( type:number, tag:string, iData1:number, iData2:number, strData1:string )   
   if type == SystemUpdateUI.ScreenResize then
 	Resize();
   end
 end
 
+-- ===========================================================================
 function OnExitGame()
 	LuaEvents.Multiplayer_ExitShell();
 end
 
+-- ===========================================================================
 function OnExitGameAskAreYouSure()
 	if Network.IsInSession() then
 		if (not m_kPopupDialog:IsOpen()) then
@@ -333,6 +398,8 @@ function Initialize()
 	ContextPtr:SetHideHandler(OnHide);
 
 	Controls.DefaultButton:RegisterCallback( Mouse.eLClick, OnDefaultButton);
+	Controls.LoadConfigButton:RegisterCallback( Mouse.eLClick, OnLoadConfig);
+	Controls.SaveConfigButton:RegisterCallback( Mouse.eLClick, OnSaveConfig);
 	Controls.ConfirmButton:RegisterCallback( Mouse.eLClick, OnConfirmClick );
 	Controls.ModsButton:RegisterCallback( Mouse.eLClick, ModsButtonClick );
 

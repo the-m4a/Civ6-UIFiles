@@ -1,72 +1,89 @@
-----------------------------------------------------------------------------
--- Ingame Turn Order Panel
-----------------------------------------------------------------------------
+-- Copyright 2016-2019, Firaxis Games
+-- (Multiplayer) Pause Panel
+include("PopupPriorityLoader_", true);
 
 
-
-----------------------------------------------------------------------------
--- Globals
-local NO_PLAYER = -1;
-
-
-----------------------------------------------------------------------------
+-- ===========================================================================
 -- Internal Functions
-function StartPanelClose()
-	Controls.AlphaOut:Play();
-	Controls.SlideOut:Play();
-end
+function OpenPausePanel()
+	if(ContextPtr:IsHidden() == true) then
+		UIManager:QueuePopup(ContextPtr, PopupPriority.PausePanel);	
 
--- Play panel opening animations if it is not already open or opening.
-function StartPanelOpen()
-	if((Controls.SlideIn:IsStopped() and Controls.SlideIn:GetProgress() < 1)	-- SlideIn not fully deployed and not running
-		or not Controls.SlideOut:IsStopped()									-- SlideOut is playing
-		or Controls.SlideOut:GetProgress() > 0) then							-- SlideOut is partially deployed.
-		Controls.AlphaIn:SetToBeginning(); 
-		Controls.SlideIn:SetToBeginning();
-		Controls.AlphaOut:SetToBeginning();
-		Controls.SlideOut:SetToBeginning();
-		Controls.AlphaIn:Play(); 
-		Controls.SlideIn:Play();
+		Controls.PopupAlphaIn:SetToBeginning();
+		Controls.PopupAlphaIn:Play();
+		Controls.PopupSlideIn:SetToBeginning();
+		Controls.PopupSlideIn:Play();
 	end
+end 
+
+
+-- ===========================================================================
+function ClosePausePanel()
+	UIManager:DequeuePopup( ContextPtr );
 end
 
+
+-- ===========================================================================
 function CheckPausedState()
 	if(not GameConfiguration.IsPaused()) then
-		StartPanelClose();
+		ClosePausePanel();
 		return;
 	else
 		local pausePlayerID : number = GameConfiguration.GetPausePlayer();
-		if(pausePlayerID == NO_PLAYER) then
-			StartPanelClose();
+		if (pausePlayerID ==  PlayerTypes.OBSERVER or pausePlayerID == PlayerTypes.NONE) then
+			ClosePausePanel();
 			return;
 		end
-				
-		Controls.Root:SetHide(false);
 
 		-- Get pause player
 		local pausePlayer = PlayerConfigurations[pausePlayerID];
 		local pausePlayerName : string = pausePlayer:GetPlayerName();
 		Controls.WaitingLabel:LocalizeAndSetText("LOC_GAME_PAUSED_BY", pausePlayerName);
 
-		StartPanelOpen();
+		OpenPausePanel();		
 	end
 end
 
 
-----------------------------------------------------------------------------
--- Event Handlers
+-- ===========================================================================
+--	Event
+-- ===========================================================================
 function OnGameConfigChanged()
 	CheckPausedState();
 end
 
-----------------------------------------------------------------------------
--- Initialization
+
+-- ===========================================================================
+--	Event
+-- ===========================================================================
+function OnMenu()
+    LuaEvents.PausePanel_OpenInGameOptionsMenu();
+end
+
+-- ===========================================================================
+--	Callback
+-- ===========================================================================
+function OnShutdown()
+	Events.GameConfigChanged.Remove(CheckPausedState);
+	Events.PlayerInfoChanged.Remove(CheckPausedState);
+	Events.LoadScreenClose.Remove(CheckPausedState);
+end
+
+-- ===========================================================================
 function Initialize()
-	if(not GameConfiguration.IsHotseat()) then
+
+	ContextPtr:SetShutdown( OnShutdown );
+
+	if(not GameConfiguration.IsHotseat() and not WorldBuilder.IsActive()) then
 		CheckPausedState();
+
 		Events.GameConfigChanged.Add(CheckPausedState);
 		Events.PlayerInfoChanged.Add(CheckPausedState);
 		Events.LoadScreenClose.Add(CheckPausedState);
+
+		Controls.PauseStack:CalculateSize();
+	else
+		ContextPtr:SetHide(true);
 	end
 end
 Initialize();

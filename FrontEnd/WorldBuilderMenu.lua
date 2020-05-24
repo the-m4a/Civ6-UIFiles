@@ -2,34 +2,28 @@
 -- ===========================================================================
 -- Button Handlers
 -- ===========================================================================
-function OnNewWorldBuilderMap()
+function OnImportWorldBuilderMap()
+	UIManager:DequeuePopup( ContextPtr );	-- make Back from the load screen go directly to the main menu
+
 	GameConfiguration.SetToDefaults();
 	GameConfiguration.SetWorldBuilderEditor(true);
+	MapConfiguration.SetScript("WBImport.lua");
 	local advancedSetup = ContextPtr:LookUpControl( "/FrontEnd/MainMenu/AdvancedSetup" );
 	UIManager:QueuePopup(advancedSetup, PopupPriority.Current);
+	Controls.SwitchPopup:SetHide(true);
 end
-Controls.NewWorldBuilderMap:RegisterCallback( Mouse.eLClick, OnNewWorldBuilderMap );
+Controls.WBAConfirmButton:RegisterCallback( Mouse.eLClick, OnImportWorldBuilderMap ); 
+Controls.WBAConfirmButton:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
 
+function OnCancelImport()
+	Controls.SwitchPopup:SetHide(true);
 
--- ===========================================================================
-function OnLoadWorldBuilderMap()
-	GameConfiguration.SetToDefaults();
-	LuaEvents.MainMenu_SetLoadGameServerType(ServerType.SERVER_TYPE_NONE);
-	GameConfiguration.SetWorldBuilderEditor(true);
-	local loadGameMenu = ContextPtr:LookUpControl( "/FrontEnd/MainMenu/LoadGameMenu" );
-	UIManager:QueuePopup(loadGameMenu, PopupPriority.Current);	
-end
-Controls.LoadWorldBuilderMap:RegisterCallback( Mouse.eLClick, OnLoadWorldBuilderMap );
-
--------------------------------------------------
--- Back Button Handler
--------------------------------------------------
-function BackButtonClick()
 	GameConfiguration.SetWorldBuilderEditor(false);
 	UIManager:DequeuePopup( ContextPtr );
 end
-Controls.BackButton:RegisterCallback( Mouse.eLClick, BackButtonClick );
-Controls.BackButton:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
+
+Controls.WBACancelButton:RegisterCallback( Mouse.eLClick, OnCancelImport );
+Controls.WBACancelButton:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound("Main_Menu_Mouse_Over"); end);
 
 -------------------------------------------------
 -- Input Handler
@@ -37,10 +31,18 @@ Controls.BackButton:RegisterCallback( Mouse.eMouseEnter, function() UI.PlaySound
 function InputHandler( uiMsg, wParam, lParam )
 	if uiMsg == KeyEvents.KeyUp then
 		if wParam == Keys.VK_ESCAPE then
-			BackButtonClick();
+			OnCancelImport();
 		end
 	end
 	return true;
 end
 ContextPtr:SetInputHandler( InputHandler );
+
+-- ===========================================================================
+function OnShow()
+	Controls.SwitchPopup:SetHide(false);
+end
+
+ContextPtr:SetShowHandler( OnShow );
+Controls.SwitchPopup:SetHide(false);
 

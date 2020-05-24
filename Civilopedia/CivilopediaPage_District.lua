@@ -292,6 +292,11 @@ PageLayouts["District" ] = function(page)
 
 				local key = (row.TilesRequired > 1) and "LOC_TYPE_TRAIT_ADJACENT_BONUS_PER" or "LOC_TYPE_TRAIT_ADJACENT_BONUS";
 
+				-- Exception - Adjacent river gold bonuses can only be gained once
+				if row.AdjacentRiver == true then
+					key = "LOC_TYPE_TRAIT_ADJACENT_BONUS_ONCE";
+				end
+
 				local value = Locale.Lookup(key, row.YieldChange, yield.IconString, yield.Name, row.TilesRequired, object);
 
 				if(row.PrereqCivic or row.PrereqTech) then
@@ -386,6 +391,26 @@ PageLayouts["District" ] = function(page)
 	local airSlots = tonumber(district.AirSlots) or 0;
 	if(airSlots ~= 0) then
 		table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_AIRSLOTS", airSlots));
+	end
+	
+	local pillageAwards = district.PlunderType or NO_PLUNDER;
+	if(pillageAwards ~= nil and  pillageAwards ~= "NO_PLUNDER") then
+		if(pillageAwards == "PLUNDER_CULTURE") then
+			local culture = GameInfo.Yields["YIELD_CULTURE"];
+			table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_PILLAGE_AWARD", culture.IconString, culture.Name));
+		elseif (pillageAwards == "PLUNDER_SCIENCE") then
+			local science = GameInfo.Yields["YIELD_SCIENCE"];
+			table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_PILLAGE_AWARD", science.IconString, science.Name));
+		elseif (pillageAwards == "PLUNDER_FAITH") then
+			local faith = GameInfo.Yields["YIELD_FAITH"];
+			table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_PILLAGE_AWARD", faith.IconString, faith.Name));
+		elseif (pillageAwards == "PLUNDER_GOLD") then
+			local gold = GameInfo.Yields["YIELD_GOLD"];
+			table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_PILLAGE_AWARD", gold.IconString, gold.Name));
+		elseif (pillageAwards == "PLUNDER_HEAL") then
+			local faith = GameInfo.Yields["YIELD_FAITH"];
+			table.insert(stats, Locale.Lookup("LOC_TYPE_TRAIT_PILLAGE_AWARD_NO_ICON", "LOC_TYPE_TRAIT_PILLAGE_AWARD_HEALING"));
+		end
 	end
 
 	local maintenance = district.Maintenance;

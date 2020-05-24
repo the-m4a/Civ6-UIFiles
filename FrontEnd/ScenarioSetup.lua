@@ -4,16 +4,38 @@
 include("InstanceManager");
 include("PlayerSetupLogic");
 include("Civ6Common");
--- ===========================================================================
--- ===========================================================================
+include("SupportFunctions");
 
 -- ===========================================================================
 -- ===========================================================================
+
+local PULLDOWN_TRUNCATE_OFFSET:number = 40;
+
+-- ===========================================================================
+-- ===========================================================================
+
+-- Instance managers for dynamic simple game options.
+g_SimpleBooleanParameterManager = InstanceManager:new("SimpleBooleanParameterInstance", "CheckBox", Controls.CheckBoxParent);
+g_SimplePullDownParameterManager = InstanceManager:new("SimplePullDownParameterInstance", "Root", Controls.PullDownParent);
+g_SimpleSliderParameterManager = InstanceManager:new("SimpleSliderParameterInstance", "Root", Controls.SliderParent);
+g_SimpleStringParameterManager = InstanceManager:new("SimpleStringParameterInstance", "StringRoot", Controls.EditBoxParent);
 
 local m_NonLocalPlayerSlotManager	:table = InstanceManager:new("NonLocalPlayerSlotInstance", "Root", Controls.NonLocalPlayersSlotStack);
 local m_singlePlayerID				:number = 0;			-- The player ID of the human player in singleplayer.
 local m_AdvancedMode				:boolean = false;
 local m_ScenarioData				:table = {};
+
+-- ===========================================================================
+-- Override hiding game setup to release simplified instances.
+-- ===========================================================================
+GameSetup_HideGameSetup = HideGameSetup;
+function HideGameSetup(func)
+	GameSetup_HideGameSetup(func);
+	g_SimpleBooleanParameterManager:ResetInstances();
+	g_SimplePullDownParameterManager:ResetInstances();
+	g_SimpleSliderParameterManager:ResetInstances();
+	g_SimpleStringParameterManager:ResetInstances();
+end
 
 -- ===========================================================================
 -- Input Handler
@@ -29,7 +51,21 @@ function OnInputHandler( pInputStruct:table )
 	return true;
 end
 
--- Override for SetupParameters to filter ruleset values by scenario only.
+local _UI_BeforeRefresh = UI_BeforeRefresh;
+function UI_BeforeRefresh()
+	
+	if(_UI_BeforeRefresh) then
+		_UI_BeforeRefresh();
+	end
+
+	-- Reset basic setup container states
+	Controls.CreateGame_GameDifficultyContainer:SetHide(true);
+	Controls.CreateGame_SpeedPulldownContainer:SetHide(true);
+	Controls.CreateGame_MapTypeContainer:SetHide(true);
+	Controls.CreateGame_MapSizeContainer:SetHide(true);
+end
+
+-- Override for SetupParameters to filter ruleset values by non-scenario only.
 function GameParameters_FilterValues(o, parameter, values)
 	values = o.Default_Parameter_FilterValues(o, parameter, values);
 	if(parameter.ParameterId == "Ruleset") then
@@ -101,7 +137,8 @@ function CreatePulldownDriver(o, parameter, c, container)
 		Container = container,
 		UpdateValue = function(value)
 			local button = c:GetButton();
-			button:SetText( value and value.Name or nil);
+			local truncateWidth = button:GetSizeX() - PULLDOWN_TRUNCATE_OFFSET;
+			TruncateStringWithTooltip(button, truncateWidth, value and value.Name or nil);
 		end,
 		UpdateValues = function(values)
 			-- If container was included, hide it if there is only 1 possible value.
@@ -135,10 +172,12 @@ function CreatePulldownDriver(o, parameter, c, container)
 				c:CalculateInternals();
 			end			
 		end,
-		SetEnabled = function(enabled)
-			c:SetDisabled(not enabled);
+		SetEnabled = function(enabled, parameter)
+			c:SetDisabled(not enabled or #parameter.Values <= 1);
 		end,
-		SetVisible = nil,	-- Never hide the basic pulldown.
+		SetVisible = function(visible, parameter)
+			container:SetHide(not visible or parameter.Value == nil or #parameter.Values <= 1);
+		end,	
 		Destroy = nil,		-- It's a fixed control, no need to delete.
 	};
 	
@@ -168,7 +207,7 @@ g_ParameterFactories["Ruleset"] = function(o, parameter)
 	local drivers = {};
 	-- Basic setup version.
 	-- Use an explicit table.
-	table.insert(drivers, CreatePulldownDriver(o, parameter, Controls.CreateGame_GameRuleset));
+	table.insert(drivers, CreatePulldownDriver(o, parameter, Controls.CreateGame_GameRuleset, Controls.CreateGame_RulesetContainer));
 
 	table.insert(drivers, CreateRightPanelDescriptionDriver(o, parameter));
 
@@ -237,6 +276,233 @@ g_ParameterFactories["MapSize"] = function(o, parameter)
 	return drivers;
 end
 
+function CreateSimpleParameterDriver(o, parameter, parent)
+
+	if(parent == nil) then
+		parent = GetControlStack(parameter.GroupId);
+	end
+
+	local control;
+	
+	-- If there is no parent, don't visualize the control.  This is most likely a player parameter.
+	if(parent == nil) then
+		return;
+	end;
+
+	if(parameter.Domain == "bool") then
+		local c = g_SimpleBooleanParameterManager:GetInstance();	
+		
+		local name = Locale.ToUpper(parameter.Name);
+		c.CheckBox:SetText(name);
+		c.CheckBox:SetToolTipString(parameter.Description);
+		c.CheckBox:RegisterCallback(Mouse.eLClick, function()
+			o:SetParameterValue(parameter, not c.CheckBox:IsSelected());
+			Network.BroadcastGameConfig();
+		end);
+		c.CheckBox:ChangeParent(parent);
+
+		control = {
+			Control = c,
+			UpdateValue = function(value, parameter)
+				
+				-- Sometimes the parameter name is changed, be sure to update it.
+				c.CheckBox:SetText(parameter.Name);
+				c.CheckBox:SetToolTipString(parameter.Description);
+				
+				-- We have to invalidate the selection state in order
+				-- to trick the button to use the right vis state..
+				-- Please change this to a real check box in the future...please
+				c.CheckBox:SetSelected(not value);
+				c.CheckBox:SetSelected(value);
+			end,
+			SetEnabled = function(enabled)
+				c.CheckBox:SetDisabled(not enabled);
+			end,
+			SetVisible = function(visible)
+				c.CheckBox:SetHide(not visible);
+			end,
+			Destroy = function()
+				g_SimpleBooleanParameterManager:ReleaseInstance(c);
+			end,
+		};
+
+	elseif(parameter.Domain == "int" or parameter.Domain == "uint" or parameter.Domain == "text") then
+		local c = g_SimpleStringParameterManager:GetInstance();		
+
+		local name = Locale.ToUpper(parameter.Name);	
+		c.StringName:SetText(name);
+		c.StringRoot:SetToolTipString(parameter.Description);
+		c.StringEdit:SetEnabled(true);
+
+		local canChangeEnableState = true;
+
+		if(parameter.Domain == "int") then
+			c.StringEdit:SetNumberInput(true);
+			c.StringEdit:SetMaxCharacters(16);
+			c.StringEdit:RegisterCommitCallback(function(textString)
+				o:SetParameterValue(parameter, tonumber(textString));	
+				Network.BroadcastGameConfig();
+			end);
+		elseif(parameter.Domain == "uint") then
+			c.StringEdit:SetNumberInput(true);
+			c.StringEdit:SetMaxCharacters(16);
+			c.StringEdit:RegisterCommitCallback(function(textString)
+				local value = math.max(tonumber(textString) or 0, 0);
+				o:SetParameterValue(parameter, value);	
+				Network.BroadcastGameConfig();
+			end);
+		else
+			c.StringEdit:SetNumberInput(false);
+			c.StringEdit:SetMaxCharacters(64);
+			if UI.HasFeature("TextEntry") == true then
+				c.StringEdit:RegisterCommitCallback(function(textString)
+					o:SetParameterValue(parameter, textString);	
+					Network.BroadcastGameConfig();
+				end);
+			else
+				canChangeEnableState = false;
+				c.StringEdit:SetEnabled(false);
+			end
+		end
+
+		c.StringRoot:ChangeParent(parent);
+
+		control = {
+			Control = c,
+			UpdateValue = function(value)
+				c.StringEdit:SetText(value);
+			end,
+			SetEnabled = function(enabled)
+				if canChangeEnableState then
+					c.StringRoot:SetDisabled(not enabled);
+					c.StringEdit:SetDisabled(not enabled);
+				end
+			end,
+			SetVisible = function(visible)
+				c.StringRoot:SetHide(not visible);
+			end,
+			Destroy = function()
+				g_SimpleStringParameterManager:ReleaseInstance(c);
+			end,
+		};
+	elseif (parameter.Values and parameter.Values.Type == "IntRange") then -- Range
+		
+		local minimumValue = parameter.Values.MinimumValue;
+		local maximumValue = parameter.Values.MaximumValue;
+
+		-- Get the UI instance
+		local c = g_SimpleSliderParameterManager:GetInstance();	
+		
+		c.Root:ChangeParent(parent);
+
+		local name = Locale.ToUpper(parameter.Name);
+		if c.StringName ~= nil then
+			c.StringName:SetText(name);
+		end
+			
+		c.OptionTitle:SetText(name);
+		c.Root:SetToolTipString(parameter.Description);
+		c.OptionSlider:RegisterSliderCallback(function()
+			local stepNum = c.OptionSlider:GetStep();
+			
+			-- This method can get called pretty frequently, try and throttle it.
+			if(parameter.Value ~= minimumValue + stepNum) then
+				o:SetParameterValue(parameter, minimumValue + stepNum);
+				Network.BroadcastGameConfig();
+			end
+		end);
+
+
+		control = {
+			Control = c,
+			UpdateValue = function(value)
+				if(value) then
+					c.OptionSlider:SetStep(value - minimumValue);
+					c.NumberDisplay:SetText(tostring(value));
+				end
+			end,
+			UpdateValues = function(values)
+				c.OptionSlider:SetNumSteps(values.MaximumValue - values.MinimumValue);
+			end,
+			SetEnabled = function(enabled, parameter)
+				c.OptionSlider:SetHide(not enabled or parameter.Values == nil or parameter.Values.MinimumValue == parameter.Values.MaximumValue);
+			end,
+			SetVisible = function(visible, parameter)
+				c.Root:SetHide(not visible or parameter.Value == nil );
+			end,
+			Destroy = function()
+				g_SimpleSliderParameterManager:ReleaseInstance(c);
+			end,
+		};	
+	elseif (parameter.Values) then -- MultiValue
+		
+		-- Get the UI instance
+		local c = g_SimplePullDownParameterManager:GetInstance();	
+
+		c.Root:ChangeParent(parent);
+		if c.StringName ~= nil then
+			local name = Locale.ToUpper(parameter.Name);
+			c.StringName:SetText(name);
+		end
+
+		control = {
+			Control = c,
+			UpdateValue = function(value)
+				local button = c.PullDown:GetButton();
+				button:SetText( value and value.Name or nil);
+				button:SetToolTipString(value and value.Description or nil);
+			end,
+			UpdateValues = function(values)
+				c.PullDown:ClearEntries();
+
+				for i,v in ipairs(values) do
+					local entry = {};
+					c.PullDown:BuildEntry( "InstanceOne", entry );
+					entry.Button:SetText(v.Name);
+					entry.Button:SetToolTipString(v.Description);
+
+					entry.Button:RegisterCallback(Mouse.eLClick, function()
+						o:SetParameterValue(parameter, v);
+						Network.BroadcastGameConfig();
+					end);
+				end
+				c.PullDown:CalculateInternals();
+			end,
+			SetEnabled = function(enabled, parameter)
+				c.PullDown:SetDisabled(not enabled or #parameter.Values <= 1);
+			end,
+			SetVisible = function(visible, parameter)
+				c.Root:SetHide(not visible or parameter.Value == nil or #parameter.Values <= 1);
+			end,
+			Destroy = function()
+				g_SimplePullDownParameterManager:ReleaseInstance(c);
+			end,
+		};	
+	end
+
+	return control;
+end
+
+-- The method used to create a UI control associated with the parameter.
+-- Returns either a control or table that will be used in other parameter view related hooks.
+function GameParameters_UI_CreateParameter(o, parameter)
+	local func = g_ParameterFactories[parameter.ParameterId];
+
+	local control;
+	if(func)  then
+		control = func(o, parameter);
+	elseif(parameter.GroupId == "BasicGameOptions" or parameter.GroupId == "BasicMapOptions") then	
+		control = {
+			CreateSimpleParameterDriver(o, parameter, Controls.CreateGame_ExtraParametersStack),
+			GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
+		};
+	else
+		control = GameParameters_UI_DefaultCreateParameterDriver(o, parameter);
+	end
+
+	o.Controls[parameter.ParameterId] = control;
+end
+
 -- ===========================================================================
 -- Remove player handler.
 function RemovePlayer(voidValue1, voidValue2, control)
@@ -285,6 +551,7 @@ function RefreshPlayerSlots()
 		CivToolTipAlpha		= basicTooltip.CivToolTipAlpha;
 		UniqueIconIM		= InstanceManager:new("IconInfoInstance",	"Top",	basicTooltip.InfoStack );		
 		HeaderIconIM		= InstanceManager:new("IconInstance",		"Top",	basicTooltip.InfoStack );
+		CivHeaderIconIM		= InstanceManager:new("CivIconInstance",	"Top",	basicTooltip.InfoStack );
 		HeaderIM			= InstanceManager:new("HeaderInstance",		"Top",	basicTooltip.InfoStack );
 		HasLeaderPlacard	= true;
 		LeaderBG			= basicPlacard.LeaderBG;
@@ -304,14 +571,15 @@ function RefreshPlayerSlots()
 		CivToolTipAlpha		= advancedTooltip.CivToolTipAlpha;
 		UniqueIconIM		= InstanceManager:new("IconInfoInstance",	"Top",	advancedTooltip.InfoStack );		
 		HeaderIconIM		= InstanceManager:new("IconInstance",		"Top",	advancedTooltip.InfoStack );
+		CivHeaderIconIM		= InstanceManager:new("CivIconInstance",	"Top",	advancedTooltip.InfoStack );
 		HeaderIM			= InstanceManager:new("HeaderInstance",		"Top",	advancedTooltip.InfoStack );
 		HasLeaderPlacard	= false;
 	};
 
 	for i, player_id in ipairs(player_ids) do	
 		if(m_singlePlayerID == player_id) then
-			SetupLeaderPulldown(player_id, Controls, "Basic_LocalPlayerPulldown", "Basic_LocalPlayerCivIcon", "Basic_LocalPlayerLeaderIcon", basicTooltipData);
-			SetupLeaderPulldown(player_id, Controls, "Advanced_LocalPlayerPulldown", "Advanced_LocalPlayerCivIcon", "Advanced_LocalPlayerLeaderIcon", advancedTooltipData);
+			SetupLeaderPulldown(player_id, Controls, "Basic_LocalPlayerPulldown", "Basic_LocalPlayerCivIcon", "Basic_LocalPlayerCivIconBG", "Basic_LocalPlayerLeaderIcon", basicTooltipData);
+			SetupLeaderPulldown(player_id, Controls, "Advanced_LocalPlayerPulldown", "Advanced_LocalPlayerCivIcon", "Advanced_LocalPlayerCivIconBG", "Advanced_LocalPlayerLeaderIcon", advancedTooltipData);
 		else
 			local ui_instance = m_NonLocalPlayerSlotManager:GetInstance();
 			
@@ -322,7 +590,7 @@ function RefreshPlayerSlots()
 			end
 			ui_instance.RemoveButton:SetHide(not can_remove);
 			
-			SetupLeaderPulldown(player_id, ui_instance,"PlayerPullDown",nil,nil,advancedTooltipData);
+			SetupLeaderPulldown(player_id, ui_instance,"PlayerPullDown",nil,nil,nil,advancedTooltipData);
 		end
 	end
 
@@ -349,6 +617,13 @@ function UI_PostRefreshParameters()
 	-- This is primarily used to present ownership errors and custom constraint errors.
 	Controls.StartButton:SetDisabled(false);
 	Controls.StartButton:SetToolTipString(nil);
+
+	local game_err = GetGameParametersError();
+	if(game_err) then
+		Controls.StartButton:SetDisabled(true);
+		Controls.StartButton:LocalizeAndSetToolTip("LOC_SETUP_PARAMETER_ERROR");
+	end
+
 	local player_ids = GameConfiguration.GetParticipatingPlayerIDs();
 	for i, player_id in ipairs(player_ids) do	
 		local err = GetPlayerParameterError(player_id);

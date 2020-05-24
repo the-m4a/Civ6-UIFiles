@@ -4,25 +4,29 @@
 include( "InstanceManager" );
 include ("SetupParameters");
 
--- Instance managers for dynamic game options.
-g_BooleanParameterManager = InstanceManager:new("BooleanParameterInstance", "CheckBox", Controls.CheckBoxParent);
-g_PullDownParameterManager = InstanceManager:new("PullDownParameterInstance", "Root", Controls.PullDownParent);
-g_SliderParameterManager = InstanceManager:new("SliderParameterInstance", "Root", Controls.SliderParent);
-g_StringParameterManager = InstanceManager:new("StringParameterInstance", "StringRoot", Controls.EditBoxParent);
+-- Instance managers for dynamic game options (parent is set dynamically).
+g_BooleanParameterManager	= InstanceManager:new("BooleanParameterInstance",	"CheckBox");
+g_PullDownParameterManager	= InstanceManager:new("PullDownParameterInstance",	"Root");
+g_SliderParameterManager	= InstanceManager:new("SliderParameterInstance",	"Root");
+g_StringParameterManager	= InstanceManager:new("StringParameterInstance",	"StringRoot");
+g_ButtonParameterManager	= InstanceManager:new("ButtonParameterInstance",	"ButtonRoot");
 
 g_ParameterFactories = {};
 
 -- This is a mapping of instanced controls to their parameters.
 -- It's used to cross reference the parameter from the control
 -- in order to sort that control.
-local g_SortingMap = {};
+g_SortingMap = {};
 
 -------------------------------------------------------------------------------
 -- Determine which UI stack the parameters should be placed in.
 -------------------------------------------------------------------------------
 function GetControlStack(group)
 	local triage = {
+
+		["BasicGameOptions"] = Controls.PrimaryParametersStack,
 		["GameOptions"] = Controls.PrimaryParametersStack,
+		["BasicMapOptions"] = Controls.PrimaryParametersStack,
 		["MapOptions"] = Controls.PrimaryParametersStack,
 		["Victories"] = Controls.VictoryParameterStack,
 		["AdvancedOptions"] = Controls.SecondaryParametersStack,
@@ -32,6 +36,13 @@ function GetControlStack(group)
 	return triage[group];
 end
 
+-------------------------------------------------------------------------------
+-- This function wrapper allows us to override this function and prevent
+-- network broadcasts for every change made - used currently in Options.lua
+-------------------------------------------------------------------------------
+function BroadcastGameConfigChanges()
+	Network.BroadcastGameConfig();
+end
 
 -------------------------------------------------------------------------------
 -- Parameter Hooks
@@ -42,7 +53,7 @@ function Parameters_Config_EndWrite(o, config_changed)
 	-- Dispatch a Lua event notifying that the configuration has changed.
 	-- This will eventually be handled by the configuration layer itself.
 	if(config_changed) then
-		print("Marking Configuration as Changed.");
+		SetupParameters_Log("Marking Configuration as Changed.");
 		if(GameSetup_ConfigurationChanged) then
 			GameSetup_ConfigurationChanged();
 		end
@@ -97,14 +108,21 @@ function GetRelevantParameters(o, parameter)
 
 	elseif(GameConfiguration.IsInternetMultiplayer()) then
 		return parameter.SupportsInternetMultiplayer;
+
+	elseif(GameConfiguration.IsPlayByCloud()) then
+		return parameter.SupportsPlayByCloud;
 	end
 	
 	return true;
 end
 
 
-function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
-	local parent = GetControlStack(parameter.GroupId);
+function GameParameters_UI_DefaultCreateParameterDriver(o, parameter, parent)
+
+	if(parent == nil) then
+		parent = GetControlStack(parameter.GroupId);
+	end
+
 	local control;
 	
 	-- If there is no parent, don't visualize the control.  This is most likely a player parameter.
@@ -123,7 +141,7 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 		c.CheckBox:SetToolTipString(parameter.Description);
 		c.CheckBox:RegisterCallback(Mouse.eLClick, function()
 			o:SetParameterValue(parameter, not c.CheckBox:IsSelected());
-			Network.BroadcastGameConfig();
+			BroadcastGameConfigChanges();
 		end);
 		c.CheckBox:ChangeParent(parent);
 
@@ -169,7 +187,7 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			c.StringEdit:SetMaxCharacters(16);
 			c.StringEdit:RegisterCommitCallback(function(textString)
 				o:SetParameterValue(parameter, tonumber(textString));	
-				Network.BroadcastGameConfig();
+				BroadcastGameConfigChanges();
 			end);
 		elseif(parameter.Domain == "uint") then
 			c.StringEdit:SetNumberInput(true);
@@ -177,7 +195,7 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			c.StringEdit:RegisterCommitCallback(function(textString)
 				local value = math.max(tonumber(textString) or 0, 0);
 				o:SetParameterValue(parameter, value);	
-				Network.BroadcastGameConfig();
+				BroadcastGameConfigChanges();
 			end);
 		else
 			c.StringEdit:SetNumberInput(false);
@@ -185,7 +203,7 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			if UI.HasFeature("TextEntry") == true then
 				c.StringEdit:RegisterCommitCallback(function(textString)
 					o:SetParameterValue(parameter, textString);	
-					Network.BroadcastGameConfig();
+					BroadcastGameConfigChanges();
 				end);
 			else
 				canChangeEnableState = false;
@@ -237,7 +255,7 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			-- This method can get called pretty frequently, try and throttle it.
 			if(parameter.Value ~= minimumValue + stepNum) then
 				o:SetParameterValue(parameter, minimumValue + stepNum);
-				Network.BroadcastGameConfig();
+				BroadcastGameConfigChanges();
 			end
 		end);
 
@@ -255,6 +273,11 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			end,
 			SetEnabled = function(enabled, parameter)
 				c.OptionSlider:SetHide(not enabled or parameter.Values == nil or parameter.Values.MinimumValue == parameter.Values.MaximumValue);
+				if(not enabled) then
+					c.Root:SetOffsetX(-140);
+				else
+					c.Root:SetOffsetX(0);
+				end
 			end,
 			SetVisible = function(visible, parameter)
 				c.Root:SetHide(not visible or parameter.Value == nil );
@@ -276,28 +299,56 @@ function GameParameters_UI_DefaultCreateParameterDriver(o, parameter)
 			c.StringName:SetText(parameter.Name);
 		end
 
+		local cache = {};
+
 		control = {
 			Control = c,
+			Cache = cache,
 			UpdateValue = function(value)
-				local button = c.PullDown:GetButton();
-				button:SetText( value and value.Name or nil);
-				button:SetToolTipString(value and value.Description or nil);
+				local valueText = value and value.Name or nil;
+				local valueDescription = value and value.Description or nil
+				if(cache.ValueText ~= valueText or cache.ValueDescription ~= valueDescription) then
+					local button = c.PullDown:GetButton();
+					button:SetText(valueText);
+					button:SetToolTipString(valueDescription);
+					cache.ValueText = valueText;
+					cache.ValueDescription = valueDescription;
+				end
 			end,
 			UpdateValues = function(values)
-				c.PullDown:ClearEntries();
-
-				for i,v in ipairs(values) do
-					local entry = {};
-					c.PullDown:BuildEntry( "InstanceOne", entry );
-					entry.Button:SetText(v.Name);
-					entry.Button:SetToolTipString(v.Description);
-
-					entry.Button:RegisterCallback(Mouse.eLClick, function()
-						o:SetParameterValue(parameter, v);
-						Network.BroadcastGameConfig();
-					end);
+				local refresh = false;
+				local cValues = cache.Values;
+				if(cValues and #cValues == #values) then
+					for i,v in ipairs(values) do
+						local cv = cValues[i];
+						if(cv == nil) then
+							refresh = true;
+							break;
+						elseif(cv.QueryId ~= v.QueryId or cv.QueryIndex ~= v.QueryIndex or cv.Invalid ~= v.Invalid or cv.InvalidReason ~= v.InvalidReason) then
+							refresh = true;
+							break;
+						end
+					end
+				else
+					refresh = true;
 				end
-				c.PullDown:CalculateInternals();
+				
+				if(refresh) then
+					c.PullDown:ClearEntries();			
+					for i,v in ipairs(values) do
+						local entry = {};
+						c.PullDown:BuildEntry( "InstanceOne", entry );
+						entry.Button:SetText(v.Name);
+						entry.Button:SetToolTipString(Locale.Lookup(v.RawDescription));
+
+						entry.Button:RegisterCallback(Mouse.eLClick, function()
+							o:SetParameterValue(parameter, v);
+							BroadcastGameConfigChanges();
+						end);
+					end
+					cache.Values = values;
+					c.PullDown:CalculateInternals();
+				end
 			end,
 			SetEnabled = function(enabled, parameter)
 				c.PullDown:SetDisabled(not enabled or #parameter.Values <= 1);
@@ -462,7 +513,9 @@ function GameParameters_UI_AfterRefresh(o)
 	Controls.ParametersStack:CalculateSize();
 	Controls.ParametersStack:ReprocessAnchoring();
 
-	Controls.ParametersScrollPanel:CalculateInternalSize();
+	if Controls.ParametersScrollPanel then
+		Controls.ParametersScrollPanel:CalculateInternalSize();
+	end
 end
 
 -------------------------------------------------------------------------------
@@ -471,11 +524,14 @@ end
 -------------------------------------------------------------------------------
 function GameParameters_PostProcess(o, parameter)
 	
-	local triage = {
-		["MapOptions"] = "GameOptions",
-	};
-
-	parameter.GroupId = triage[parameter.GroupId] or parameter.GroupId;
+	-- Move all groups into 1 singular group for sorting purposes.
+	--local triage = {
+		--["BasicGameOptions"] = "GameOptions",
+		--["BasicMapOptions"] = "GameOptions",
+		--["MapOptions"] = "GameOptions",
+	--};
+--
+	--parameter.GroupId = triage[parameter.GroupId] or parameter.GroupId;
 end
 
 -- Generate the game setup parameters and populate the UI.
@@ -494,6 +550,7 @@ function BuildGameSetup(createParameterFunc)
 	g_GameParameters.Parameter_PostProcess = GameParameters_PostProcess;
 	g_GameParameters.Parameter_SyncAuxConfigurationValues = GameParameters_SyncAuxConfigurationValues;
 	g_GameParameters.Config_WriteAuxParameterValues = GameParameters_WriteAuxParameterValues;
+	g_GameParameters.UI_BeforeRefresh = UI_BeforeRefresh;
 	g_GameParameters.UI_AfterRefresh = GameParameters_UI_AfterRefresh;
 	g_GameParameters.UI_CreateParameter = createParameterFunc ~= nil and createParameterFunc or GameParameters_UI_CreateParameter;
 	g_GameParameters.UI_DestroyParameter = UI_DestroyParameter;
@@ -547,6 +604,7 @@ function BuildHeadlessGameSetup()
 	g_GameParameters:Initialize();
 end
 
+-- ===========================================================================
 -- Hide game setup parameters.
 function HideGameSetup(hideParameterFunc)
 	print("Hiding Game Setup");
@@ -563,12 +621,13 @@ function HideGameSetup(hideParameterFunc)
 		g_PullDownParameterManager:ResetInstances();
 		g_SliderParameterManager:ResetInstances();
 		g_StringParameterManager:ResetInstances();
+		g_ButtonParameterManager:ResetInstances();
 	else
 		hideParameterFunc();
 	end
 end
 
-
+-- ===========================================================================
 function MapSize_ValueNeedsChanging(p)
 	local results = CachedQuery("SELECT * from MapSizes where Domain = ? and MapSizeType = ? LIMIT 1", p.Value.Domain, p.Value.Value);
 
@@ -592,16 +651,16 @@ function MapSize_ValueNeedsChanging(p)
 
 	-- TODO: Add Min/Max city states, set defaults.
 	if(MapConfiguration.GetMinMajorPlayers() ~= minPlayers) then
-		print("Min Major Players: " .. MapConfiguration.GetMinMajorPlayers() .. " should be " .. minPlayers);
+		SetupParameters_Log("Min Major Players: " .. MapConfiguration.GetMinMajorPlayers() .. " should be " .. minPlayers);
 		return true;
 	elseif(MapConfiguration.GetMaxMajorPlayers() ~= maxPlayers) then
-		print("Max Major Players: " .. MapConfiguration.GetMaxMajorPlayers() .. " should be " .. maxPlayers);
+		SetupParameters_Log("Max Major Players: " .. MapConfiguration.GetMaxMajorPlayers() .. " should be " .. maxPlayers);
 		return true;
 	elseif(MapConfiguration.GetMinMinorPlayers() ~= minCityStates) then
-		print("Min Minior Players: " .. MapConfiguration.GetMinMinorPlayers() .. " should be " .. minCityStates);
+		SetupParameters_Log("Min Minor Players: " .. MapConfiguration.GetMinMinorPlayers() .. " should be " .. minCityStates);
 		return true;
 	elseif(MapConfiguration.GetMaxMinorPlayers() ~= maxCityStates) then
-		print("Max Minior Players: " .. MapConfiguration.GetMaxMinorPlayers() .. " should be " .. maxCityStates);
+		SetupParameters_Log("Max Minor Players: " .. MapConfiguration.GetMaxMinorPlayers() .. " should be " .. maxCityStates);
 		return true;
 	end
 
@@ -609,7 +668,7 @@ function MapSize_ValueNeedsChanging(p)
 end
 
 function MapSize_ValueChanged(p)
-	print("MAP SIZE CHANGED");
+	SetupParameters_Log("MAP SIZE CHANGED");
 
 	-- The map size has changed!
 	-- Adjust the number of players to match the default players of the map size.
@@ -642,13 +701,14 @@ function MapSize_ValueChanged(p)
 	-- Clamp participating player count in network multiplayer so we only ever auto-spawn players up to the supported limit. 
 	local mpMaxSupportedPlayers = 8; -- The officially supported number of players in network multiplayer games.
 	local participatingCount = defPlayers + GameConfiguration.GetHiddenPlayerCount();
-	if GameConfiguration.IsNetworkMultiplayer() then
+	if GameConfiguration.IsNetworkMultiplayer() or GameConfiguration.IsPlayByCloud() then
 		participatingCount = math.clamp(participatingCount, 0, mpMaxSupportedPlayers);
 	end
 
-	print("Setting participating layer count to " .. tonumber(participatingCount));
+	SetupParameters_Log("Setting participating player count to " .. tonumber(participatingCount));
 	local playerCountChange = GameConfiguration.SetParticipatingPlayerCount(participatingCount);
 	Network.BroadcastGameConfig(true);
+
 
 	-- NOTE: This used to only be called if playerCountChange was non-zero.
 	-- This needs to be called more frequently than that because each player slot entry's add/remove button
